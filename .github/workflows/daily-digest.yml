@@ -96,3 +96,55 @@ jobs:
             -d "title=${TITLE}" \
             --data-urlencode "desp=${DESP}" \
             > /dev/null 2>&1 && echo "WeChat push sent!" || echo "WeChat push failed"
+            
+      - name: Push to Feishu
+        if: success()
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+        run: |
+          if [ -z "$FEISHU_WEBHOOK_URL" ]; then
+            echo "FEISHU_WEBHOOK_URL is not configured, skipping Feishu push"
+            exit 0
+          fi
+
+          DIGEST_FILE="digests/digest-$(TZ=Asia/Shanghai date +%Y%m%d).md"
+
+          if [ ! -f "$DIGEST_FILE" ]; then
+            echo "No digest file found, skipping Feishu push"
+            exit 0
+          fi
+
+          TITLE="AI日报｜AI 每日精选 $(TZ=Asia/Shanghai date +%Y-%m-%d)"
+
+          SUMMARY=$(awk '
+            /^## 📝 今日看点/{found=1}
+            /^## 📊 数据概览/{exit}
+            found{print}
+          ' "$DIGEST_FILE" | head -60)
+
+          DIGEST_URL="https://github.com/${{ github.repository }}/blob/main/${DIGEST_FILE}"
+
+          TEXT=$(printf '%s\n\n%s\n\n完整日报：%s' \
+            "$TITLE" \
+            "$SUMMARY" \
+            "$DIGEST_URL")
+
+          PAYLOAD=$(TEXT="$TEXT" bun -e '
+            process.stdout.write(JSON.stringify({
+              msg_type: "text",
+              content: {
+                text: process.env.TEXT || ""
+              }
+            }))
+          ')
+
+          echo "Sending digest to Feishu..."
+
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$PAYLOAD" \
+            "$FEISHU_WEBHOOK_URL"
+
+          echo ""
+          echo "Feishu push request completed"
