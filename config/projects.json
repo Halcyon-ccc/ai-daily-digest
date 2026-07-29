@@ -1,0 +1,86 @@
+{
+  "projects": [
+    {
+      "id": "agent-security",
+      "name": "Agent 基座安全与合规",
+      "goal": "跟踪 Agent 安全护栏、工具权限控制、隐私保护、审计和 Prompt Injection 防御方案",
+      "keywords": [
+        "AI agent security",
+        "agent security",
+        "prompt injection",
+        "tool authorization",
+        "MCP security",
+        "guardrails",
+        "PII redaction",
+        "privacy",
+        "audit logging"
+      ],
+      "entities": [
+        "OWASP",
+        "MITRE ATLAS",
+        "NIST",
+        "OpenAI",
+        "Anthropic"
+      ],
+      "exclude": [
+        "cryptocurrency",
+        "AI image generation"
+      ]
+    },
+    {
+      "id": "asr-voice",
+      "name": "ASR 与语音助手",
+      "goal": "跟踪语音识别模型、实时转写、低延迟语音助手、评测方法和模型 API",
+      "keywords": [
+        "ASR",
+        "speech recognition",
+        "speech-to-text",
+        "streaming ASR",
+        "real-time transcription",
+        "voice agent",
+        "endpointing",
+        "WER",
+        "Parakeet",
+        "Whisper"
+      ],
+      "entities": [
+        "Deepgram",
+        "AssemblyAI",
+        "ElevenLabs",
+        "NVIDIA",
+        "Google Speech",
+        "OpenAI"
+      ],
+      "exclude": [
+        "music generation",
+        "celebrity voice cloning"
+      ]
+    },
+    {
+      "id": "ocr-product",
+      "name": "商品包装 OCR",
+      "goal": "跟踪包装文字识别、字段抽取、品牌匹配、商品知识库和多模态结构化提取",
+      "keywords": [
+        "OCR",
+        "scene text recognition",
+        "packaging OCR",
+        "product label recognition",
+        "visual document understanding",
+        "structured extraction",
+        "entity resolution",
+        "product knowledge base",
+        "multimodal extraction"
+      ],
+      "entities": [
+        "PaddleOCR",
+        "Qwen VL",
+        "Google Document AI",
+        "Azure Document Intelligence"
+      ],
+      "exclude": [
+        "license plate recognition",
+        "handwriting only"
+      ]
+    }
+  ]
+}
