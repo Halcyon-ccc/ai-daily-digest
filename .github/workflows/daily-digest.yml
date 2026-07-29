@@ -2,7 +2,7 @@ name: AI Daily Digest
 
 on:
   schedule:
-    # UTC 23:39 = 北京时间 7:39
+    # UTC 00:10 = 北京时间 08:10
     - cron: '10 0 * * *'
   workflow_dispatch:
 
@@ -46,7 +46,10 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           OPENAI_API_BASE: https://api.deepseek.com/v1
-          OPENAI_MODEL: deepseek-chat
+          OPENAI_MODEL: deepseek-v4-flash
+          AI_PRIMARY_PROVIDER: openai
+          AI_REQUEST_TIMEOUT_MS: 180000
+          DEEPSEEK_THINKING_TASKS: scoring,highlights
           RSSHUB_BASE_URL: http://localhost:1200
           X_ACCOUNTS: ${{ vars.X_ACCOUNTS || 'grok,xingpt,FinanceYF5,sodawhite_dev,yetone,runes_leo,abskoop,egeberkina,vasuman,eptwts,EXM7777,steipete,rileybrown,yangyi,manateelazycat,lifesinger,yuxiyou,gregisenberg,oran_ge,LangChain,OpenAI,AnthropicAI,Khazix0918,dotey,deepseek_ai,_akhaliq,DrJimFan,hardmaru,LumaLabsAI,huggingface' }}
         run: |

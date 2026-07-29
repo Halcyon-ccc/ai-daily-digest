@@ -1,4 +1,4 @@
-import { writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import process from 'node:process';
 
@@ -13,6 +13,12 @@ const FEED_FETCH_TIMEOUT_MS = 15_000;
 const FEED_CONCURRENCY = 10;
 const GEMINI_BATCH_SIZE = 10;
 const MAX_CONCURRENT_GEMINI = 2;
+const DEFAULT_AI_REQUEST_TIMEOUT_MS = 180_000;
+const DEFAULT_DEEPSEEK_THINKING_TASKS = 'scoring,highlights';
+const DEFAULT_PROJECTS_CONFIG_PATH = 'config/projects.json';
+const PROJECT_MATCH_RELEVANCE_THRESHOLD = 6;
+const MAX_PROJECT_MATCHES_PER_ARTICLE = 5;
+const MAX_PROJECT_TEXT_LENGTH = 240;
 
 // 96 RSS feeds from Hacker News Popularity Contest 2025 (curated by Karpathy)
 const RSS_FEEDS: Array<{ name: string; xmlUrl: string; htmlUrl: string }> = [
@@ -181,20 +187,40 @@ interface ScoredArticle extends Article {
   };
   category: CategoryId;
   keywords: string[];
+  projectMatches: ProjectMatch[];
   titleZh: string;
   summary: string;
   reason: string;
 }
 
+interface ProjectConfig {
+  id: string;
+  name: string;
+  goal: string;
+  keywords: string[];
+  entities: string[];
+  exclude: string[];
+}
+
+interface ProjectMatch {
+  projectId: string;
+  projectRelevance: number;
+  actionability: number;
+  whyRelevant: string;
+  recommendedAction: string;
+}
+
+interface ArticleScore {
+  relevance: number;
+  quality: number;
+  timeliness: number;
+  category: CategoryId;
+  keywords: string[];
+  projectMatches: ProjectMatch[];
+}
+
 interface GeminiScoringResult {
-  results: Array<{
-    index: number;
-    relevance: number;
-    quality: number;
-    timeliness: number;
-    category: string;
-    keywords: string[];
-  }>;
+  results?: unknown;
 }
 
 interface GeminiSummaryResult {
@@ -206,8 +232,11 @@ interface GeminiSummaryResult {
   }>;
 }
 
+type AITask = 'scoring' | 'summary' | 'highlights' | 'design';
+type AIProvider = 'gemini' | 'openai';
+
 interface AIClient {
-  call(prompt: string): Promise<string>;
+  call(prompt: string, task: AITask): Promise<string>;
 }
 
 interface TrendingRepo {
@@ -287,7 +316,7 @@ async function categorizeDesignArticles(
   );
 
   try {
-    const raw = await aiClient.call(prompt);
+    const raw = await aiClient.call(prompt, 'design');
     const cleaned = raw.replace(/```(?:json)?\s*/g, '').replace(/```\s*/g, '').trim();
     const parsed = JSON.parse(cleaned) as { results: Array<{ index: number; subCategory: string; titleZh: string; oneLiner: string }> };
 
@@ -659,12 +688,70 @@ async function fetchAllFeeds(feeds: typeof RSS_FEEDS): Promise<Article[]> {
 // AI Providers (Gemini + OpenAI-compatible fallback)
 // ============================================================================
 
-async function callGemini(prompt: string, apiKey: string): Promise<string> {
+async function fetchTextWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  providerLabel: string
+): Promise<{ ok: boolean; status: number; body: string }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const body = await response.text();
+    return { ok: response.ok, status: response.status, body };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`${providerLabel} request timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function logAIUsage(
+  provider: string,
+  model: string,
+  task: AITask,
+  usage: {
+    input?: number;
+    output?: number;
+    reasoning?: number;
+    cached?: number;
+    total?: number;
+  } | undefined
+): void {
+  if (!usage) return;
+
+  const values = [
+    ['input', usage.input],
+    ['output', usage.output],
+    ['reasoning', usage.reasoning],
+    ['cached', usage.cached],
+    ['total', usage.total],
+  ]
+    .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]))
+    .map(([name, value]) => `${name}=${value}`)
+    .join(' ');
+
+  if (values) {
+    console.log(`[digest] AI usage: provider=${provider} model=${model} task=${task} ${values}`);
+  }
+}
+
+async function callGemini(
+  prompt: string,
+  apiKey: string,
+  task: AITask,
+  timeoutMs: number
+): Promise<string> {
   const MAX_RETRIES = 3;
   const RETRY_DELAYS = [30_000, 60_000, 90_000]; // 30s, 60s, 90s
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+    const response = await fetchTextWithTimeout(`${GEMINI_API_URL}?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -675,12 +762,11 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
           topK: 40,
         },
       }),
-    });
+    }, timeoutMs, 'Gemini');
 
     if (response.status === 429 && attempt < MAX_RETRIES) {
-      const errorText = await response.text().catch(() => '');
       // Try to parse "retry after Xs" from the error message
-      const retryMatch = errorText.match(/retry\s+(?:after\s+|in\s+)([\d.]+)s/i);
+      const retryMatch = response.body.match(/retry\s+(?:after\s+|in\s+)([\d.]+)s/i);
       const waitMs = retryMatch
         ? Math.ceil(parseFloat(retryMatch[1]) * 1000)
         : RETRY_DELAYS[attempt];
@@ -691,15 +777,29 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
     }
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error');
-      throw new Error(`Gemini API error (${response.status}): ${errorText}`);
+      throw new Error(`Gemini API error (${response.status}): ${response.body || 'Unknown error'}`);
     }
 
-    const data = await response.json() as {
+    const data = JSON.parse(response.body) as {
       candidates?: Array<{
         content?: { parts?: Array<{ text?: string }> };
       }>;
+      usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        thoughtsTokenCount?: number;
+        cachedContentTokenCount?: number;
+        totalTokenCount?: number;
+      };
     };
+
+    logAIUsage('gemini', 'gemini-2.0-flash', task, data.usageMetadata ? {
+      input: data.usageMetadata.promptTokenCount,
+      output: data.usageMetadata.candidatesTokenCount,
+      reasoning: data.usageMetadata.thoughtsTokenCount,
+      cached: data.usageMetadata.cachedContentTokenCount,
+      total: data.usageMetadata.totalTokenCount,
+    } : undefined);
 
     return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   }
@@ -711,35 +811,71 @@ async function callOpenAICompatible(
   prompt: string,
   apiKey: string,
   apiBase: string,
-  model: string
+  model: string,
+  task: AITask,
+  thinkingTasks: ReadonlySet<AITask>,
+  timeoutMs: number
 ): Promise<string> {
   const normalizedBase = apiBase.replace(/\/+$/, '');
-  const response = await fetch(`${normalizedBase}/chat/completions`, {
+  const isDeepSeekV4 = normalizedBase.toLowerCase().includes('api.deepseek.com')
+    && model.toLowerCase().startsWith('deepseek-v4-');
+  const thinkingEnabled = isDeepSeekV4 && thinkingTasks.has(task);
+  const requestBody: Record<string, unknown> = {
+    model,
+    messages: [{ role: 'user', content: prompt }],
+  };
+
+  if (isDeepSeekV4) {
+    requestBody.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' };
+    if (thinkingEnabled) {
+      requestBody.reasoning_effort = 'high';
+    } else {
+      requestBody.temperature = 0.3;
+      requestBody.top_p = 0.8;
+    }
+  } else {
+    requestBody.temperature = 0.3;
+    requestBody.top_p = 0.8;
+  }
+
+  const response = await fetchTextWithTimeout(`${normalizedBase}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-      top_p: 0.8,
-    }),
-  });
+    body: JSON.stringify(requestBody),
+  }, timeoutMs, 'OpenAI-compatible AI');
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => 'Unknown error');
-    throw new Error(`OpenAI-compatible API error (${response.status}): ${errorText}`);
+    throw new Error(`OpenAI-compatible API error (${response.status}): ${response.body || 'Unknown error'}`);
   }
 
-  const data = await response.json() as {
+  const data = JSON.parse(response.body) as {
     choices?: Array<{
       message?: {
         content?: string | Array<{ type?: string; text?: string }>;
       };
     }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      prompt_cache_hit_tokens?: number;
+      total_tokens?: number;
+      completion_tokens_details?: {
+        reasoning_tokens?: number;
+      };
+    };
   };
+
+  const providerLabel = isDeepSeekV4 ? 'deepseek' : 'openai-compatible';
+  logAIUsage(providerLabel, model, task, data.usage ? {
+    input: data.usage.prompt_tokens,
+    output: data.usage.completion_tokens,
+    reasoning: data.usage.completion_tokens_details?.reasoning_tokens,
+    cached: data.usage.prompt_cache_hit_tokens,
+    total: data.usage.total_tokens,
+  } : undefined);
 
   const content = data.choices?.[0]?.message?.content;
   if (typeof content === 'string') return content;
@@ -754,8 +890,55 @@ async function callOpenAICompatible(
 
 function inferOpenAIModel(apiBase: string): string {
   const base = apiBase.toLowerCase();
-  if (base.includes('deepseek')) return 'deepseek-chat';
+  if (base.includes('deepseek')) return 'deepseek-v4-flash';
   return OPENAI_DEFAULT_MODEL;
+}
+
+function parseDeepSeekThinkingTasks(value: string | undefined): Set<AITask> {
+  const validTasks = new Set<AITask>(['scoring', 'summary', 'highlights', 'design']);
+  const configured = (value?.trim().toLowerCase() || DEFAULT_DEEPSEEK_THINKING_TASKS);
+
+  if (configured === 'all') return new Set(validTasks);
+  if (configured === 'none') return new Set();
+
+  const tasks = new Set<AITask>();
+  for (const name of configured.split(',').map(item => item.trim()).filter(Boolean)) {
+    if (validTasks.has(name as AITask)) {
+      tasks.add(name as AITask);
+    } else {
+      console.warn(`[digest] Ignoring unknown DeepSeek thinking task: ${name}`);
+    }
+  }
+  return tasks;
+}
+
+function parseAIPrimaryProvider(value: string | undefined): AIProvider {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized || normalized === 'gemini') return 'gemini';
+  if (normalized === 'openai' || normalized === 'deepseek') return 'openai';
+  console.warn(`[digest] Unknown AI_PRIMARY_PROVIDER=${normalized}; defaulting to gemini`);
+  return 'gemini';
+}
+
+function parseAIRequestTimeout(value: string | undefined): number {
+  if (!value?.trim()) return DEFAULT_AI_REQUEST_TIMEOUT_MS;
+  const parsed = Number(value);
+  if (Number.isFinite(parsed) && parsed >= 1_000) return Math.round(parsed);
+  console.warn(`[digest] Invalid AI_REQUEST_TIMEOUT_MS=${value}; using ${DEFAULT_AI_REQUEST_TIMEOUT_MS}`);
+  return DEFAULT_AI_REQUEST_TIMEOUT_MS;
+}
+
+function resolveAIProviderOrder(
+  preferred: AIProvider,
+  hasGemini: boolean,
+  hasOpenAI: boolean
+): AIProvider[] {
+  const available = new Set<AIProvider>();
+  if (hasGemini) available.add('gemini');
+  if (hasOpenAI) available.add('openai');
+
+  return [preferred, preferred === 'gemini' ? 'openai' : 'gemini']
+    .filter((provider): provider is AIProvider => available.has(provider));
 }
 
 function createAIClient(config: {
@@ -763,13 +946,21 @@ function createAIClient(config: {
   openaiApiKey?: string;
   openaiApiBase?: string;
   openaiModel?: string;
+  deepseekThinkingTasks: ReadonlySet<AITask>;
+  primaryProvider: AIProvider;
+  requestTimeoutMs: number;
 }): AIClient {
   const state = {
     geminiApiKey: config.geminiApiKey?.trim() || '',
     openaiApiKey: config.openaiApiKey?.trim() || '',
     openaiApiBase: (config.openaiApiBase?.trim() || OPENAI_DEFAULT_API_BASE).replace(/\/+$/, ''),
     openaiModel: config.openaiModel?.trim() || '',
-    geminiEnabled: Boolean(config.geminiApiKey?.trim()),
+    providers: resolveAIProviderOrder(
+      config.primaryProvider,
+      Boolean(config.geminiApiKey?.trim()),
+      Boolean(config.openaiApiKey?.trim())
+    ),
+    failedProviders: new Set<AIProvider>(),
     fallbackLogged: false,
   };
 
@@ -777,30 +968,40 @@ function createAIClient(config: {
     state.openaiModel = inferOpenAIModel(state.openaiApiBase);
   }
 
+  const callProvider = (provider: AIProvider, prompt: string, task: AITask): Promise<string> => {
+    if (provider === 'gemini') {
+      return callGemini(prompt, state.geminiApiKey, task, config.requestTimeoutMs);
+    }
+    return callOpenAICompatible(
+      prompt,
+      state.openaiApiKey,
+      state.openaiApiBase,
+      state.openaiModel,
+      task,
+      config.deepseekThinkingTasks,
+      config.requestTimeoutMs
+    );
+  };
+
   return {
-    async call(prompt: string): Promise<string> {
-      if (state.geminiEnabled && state.geminiApiKey) {
-        try {
-          return await callGemini(prompt, state.geminiApiKey);
-        } catch (error) {
-          if (state.openaiApiKey) {
-            if (!state.fallbackLogged) {
-              const reason = error instanceof Error ? error.message : String(error);
-              console.warn(`[digest] Gemini failed, switching to OpenAI-compatible fallback (${state.openaiApiBase}, model=${state.openaiModel}). Reason: ${reason}`);
-              state.fallbackLogged = true;
-            }
-            state.geminiEnabled = false;
-            return callOpenAICompatible(prompt, state.openaiApiKey, state.openaiApiBase, state.openaiModel);
-          }
-          throw error;
+    async call(prompt: string, task: AITask): Promise<string> {
+      const provider = state.providers.find(item => !state.failedProviders.has(item));
+      if (!provider) throw new Error('No working AI provider available.');
+
+      try {
+        return await callProvider(provider, prompt, task);
+      } catch (error) {
+        state.failedProviders.add(provider);
+        const fallback = state.providers.find(item => !state.failedProviders.has(item));
+        if (!fallback) throw error;
+
+        if (!state.fallbackLogged) {
+          const reason = error instanceof Error ? error.message : String(error);
+          console.warn(`[digest] ${provider} failed, switching to ${fallback} fallback. Reason: ${reason}`);
+          state.fallbackLogged = true;
         }
+        return callProvider(fallback, prompt, task);
       }
-
-      if (state.openaiApiKey) {
-        return callOpenAICompatible(prompt, state.openaiApiKey, state.openaiApiBase, state.openaiModel);
-      }
-
-      throw new Error('No AI API key configured. Set GEMINI_API_KEY and/or OPENAI_API_KEY.');
     },
   };
 }
@@ -815,13 +1016,207 @@ function parseJsonResponse<T>(text: string): T {
 }
 
 // ============================================================================
+// Project Configuration & Validation
+// ============================================================================
+
+function truncateText(value: unknown, maxLength = MAX_PROJECT_TEXT_LENGTH): string {
+  if (typeof value !== 'string') return '';
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  return normalized.length > maxLength ? normalized.slice(0, maxLength) : normalized;
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function clampScore(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.min(10, Math.max(1, Math.round(numeric)));
+}
+
+function validateProjectEntry(value: unknown, index: number): ProjectConfig | null {
+  if (!value || typeof value !== 'object') {
+    console.warn(`[digest] Project config: skipping project at index ${index} (not an object)`);
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const id = truncateText(record.id, 80);
+  const name = truncateText(record.name, 120);
+  const goal = truncateText(record.goal, 500);
+  const keywords = normalizeStringArray(record.keywords);
+
+  if (!id || !name || !goal || keywords.length === 0) {
+    console.warn(`[digest] Project config: skipping project at index ${index} (missing id, name, goal, or keywords)`);
+    return null;
+  }
+
+  return {
+    id,
+    name,
+    goal,
+    keywords,
+    entities: normalizeStringArray(record.entities),
+    exclude: normalizeStringArray(record.exclude),
+  };
+}
+
+async function loadProjects(configPath = process.env.PROJECTS_CONFIG_PATH || DEFAULT_PROJECTS_CONFIG_PATH): Promise<ProjectConfig[]> {
+  try {
+    const text = await readFile(configPath, 'utf8');
+    const parsed = JSON.parse(text) as { projects?: unknown };
+
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.projects)) {
+      console.warn(`[digest] Project config: ${configPath} does not contain a valid projects array; using generic digest`);
+      return [];
+    }
+
+    const projects = parsed.projects
+      .map((entry, index) => validateProjectEntry(entry, index))
+      .filter((project): project is ProjectConfig => project !== null);
+
+    console.log(`[digest] Loaded ${projects.length} projects from ${configPath}`);
+    if (projects.length === 0) {
+      console.warn(`[digest] Project config: no valid projects loaded; using generic digest`);
+    }
+    return projects;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(`[digest] Project config: could not load ${configPath} (${msg}); using generic digest`);
+    return [];
+  }
+}
+
+function validateProjectMatches(rawMatches: unknown, knownProjectIds: Set<string>): ProjectMatch[] {
+  if (!Array.isArray(rawMatches)) return [];
+
+  const matches: ProjectMatch[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of rawMatches) {
+    if (!raw || typeof raw !== 'object') continue;
+    const record = raw as Record<string, unknown>;
+    const projectId = typeof record.projectId === 'string' ? record.projectId.trim() : '';
+    if (!projectId || !knownProjectIds.has(projectId) || seen.has(projectId)) continue;
+
+    const projectRelevance = clampScore(record.projectRelevance);
+    if (projectRelevance < PROJECT_MATCH_RELEVANCE_THRESHOLD) continue;
+
+    matches.push({
+      projectId,
+      projectRelevance,
+      actionability: clampScore(record.actionability),
+      whyRelevant: truncateText(record.whyRelevant),
+      recommendedAction: truncateText(record.recommendedAction),
+    });
+    seen.add(projectId);
+
+    if (matches.length >= MAX_PROJECT_MATCHES_PER_ARTICLE) break;
+  }
+
+  return matches.sort((a, b) =>
+    b.projectRelevance - a.projectRelevance
+    || b.actionability - a.actionability
+    || a.projectId.localeCompare(b.projectId)
+  );
+}
+
+function validateArticleScore(
+  rawResult: unknown,
+  allowedIndices: Set<number>,
+  batchIndices: number[],
+  validCategories: Set<string>,
+  knownProjectIds: Set<string>
+): { index: number; score: ArticleScore } | null {
+  if (!rawResult || typeof rawResult !== 'object') return null;
+
+  const record = rawResult as Record<string, unknown>;
+  const rawIndex = typeof record.index === 'number'
+    ? record.index
+    : typeof record.index === 'string' && /^\d+$/.test(record.index.trim())
+      ? Number(record.index)
+      : NaN;
+  if (!Number.isInteger(rawIndex)) return null;
+
+  const index = allowedIndices.has(rawIndex)
+    ? rawIndex
+    : rawIndex >= 0 && rawIndex < batchIndices.length
+      ? batchIndices[rawIndex]!
+      : null;
+  if (index === null) return null;
+
+  const category = typeof record.category === 'string' && validCategories.has(record.category)
+    ? record.category as CategoryId
+    : 'other';
+
+  return {
+    index,
+    score: {
+      relevance: clampScore(record.relevance),
+      quality: clampScore(record.quality),
+      timeliness: clampScore(record.timeliness),
+      category,
+      keywords: normalizeStringArray(record.keywords).slice(0, 4),
+      projectMatches: validateProjectMatches(record.projectMatches, knownProjectIds),
+    },
+  };
+}
+
+// ============================================================================
 // AI Scoring
 // ============================================================================
 
-function buildScoringPrompt(articles: Array<{ index: number; title: string; description: string; sourceName: string }>): string {
+function buildScoringPrompt(
+  articles: Array<{ index: number; title: string; description: string; sourceName: string }>,
+  projects: ProjectConfig[]
+): string {
   const articlesList = articles.map(a =>
     `Index ${a.index}: [${a.sourceName}] ${a.title}\n${a.description.slice(0, 300)}`
   ).join('\n\n---\n\n');
+
+  const projectContext = projects.length === 0
+    ? ''
+    : `
+## 项目方向匹配
+
+请在保留通用评分字段的同时，判断文章是否与以下已配置项目方向相关。
+这些项目资料是用户明确批准用于本次评分的非敏感项目画像。不要推断或补充未在文章标题/描述中出现的信息。
+
+${projects.map(project => `### ${project.id}: ${project.name}
+- 目标: ${project.goal}
+- 关键词: ${project.keywords.join(', ')}
+- 相关实体: ${project.entities.length > 0 ? project.entities.join(', ') : '无'}
+- 排除主题: ${project.exclude.length > 0 ? project.exclude.join(', ') : '无'}`).join('\n\n')}
+
+项目匹配规则：
+1. 一篇文章可以匹配 0 个、1 个或多个项目。
+2. 只返回 projectRelevance >= 6 的项目匹配。
+3. projectId 必须来自上方项目 ID，不能编造。
+4. 关键词重合本身不足以给高分，必须结合文章主题判断。
+5. 纯营销、融资或空泛观点内容不应获得高项目分。
+6. 不要编造标题或描述没有支持的信息。
+7. whyRelevant 必须用中文说明它为何与项目相关。
+8. recommendedAction 必须用中文给出具体下一步动作。
+9. 具体动作可以包括：加入评测候选池、与当前架构对比、阅读技术文档、复现实验、增加安全检查、跟踪上游项目等。
+`;
+
+  const projectJsonExample = projects.length === 0
+    ? ''
+    : `,
+      "projectMatches": [
+        {
+          "projectId": "${projects[0]?.id || 'project-id'}",
+          "projectRelevance": 8,
+          "actionability": 7,
+          "whyRelevant": "文章主题与该项目目标直接相关。",
+          "recommendedAction": "加入后续技术评估清单，并对照当前方案检查可落地点。"
+        }
+      ]`;
 
   return `你是一个技术内容策展人，正在为一份面向技术爱好者的每日精选摘要筛选文章。
 
@@ -858,11 +1253,13 @@ function buildScoringPrompt(articles: Array<{ index: number; title: string; desc
 ## 关键词提取
 提取 2-4 个最能代表文章主题的关键词（用英文，简短，如 "Rust", "LLM", "database", "performance"）
 
+${projectContext}
+
 ## 待评分文章
 
 ${articlesList}
 
-请严格按 JSON 格式返回，不要包含 markdown 代码块或其他文字：
+请严格按 JSON 格式返回，不要包含 markdown 代码块或其他文字。每个结果的 index 必须原样使用待评分文章中 Index 后的数字，不要按批次重新编号。${projects.length > 0 ? '如果文章没有匹配项目，请返回空数组 "projectMatches": []。' : ''}
 {
   "results": [
     {
@@ -871,7 +1268,7 @@ ${articlesList}
       "quality": 7,
       "timeliness": 9,
       "category": "engineering",
-      "keywords": ["Rust", "compiler", "performance"]
+      "keywords": ["Rust", "compiler", "performance"]${projectJsonExample}
     }
   ]
 }`;
@@ -879,9 +1276,10 @@ ${articlesList}
 
 async function scoreArticlesWithAI(
   articles: Article[],
-  aiClient: AIClient
-): Promise<Map<number, { relevance: number; quality: number; timeliness: number; category: CategoryId; keywords: string[] }>> {
-  const allScores = new Map<number, { relevance: number; quality: number; timeliness: number; category: CategoryId; keywords: string[] }>();
+  aiClient: AIClient,
+  projects: ProjectConfig[]
+): Promise<Map<number, ArticleScore>> {
+  const allScores = new Map<number, ArticleScore>();
   
   const indexed = articles.map((article, index) => ({
     index,
@@ -898,32 +1296,36 @@ async function scoreArticlesWithAI(
   console.log(`[digest] AI scoring: ${articles.length} articles in ${batches.length} batches`);
   
   const validCategories = new Set<string>(['ai-ml', 'security', 'engineering', 'tools', 'opinion', 'other']);
+  const knownProjectIds = new Set(projects.map(project => project.id));
   
   for (let i = 0; i < batches.length; i += MAX_CONCURRENT_GEMINI) {
     const batchGroup = batches.slice(i, i + MAX_CONCURRENT_GEMINI);
     const promises = batchGroup.map(async (batch) => {
       try {
-        const prompt = buildScoringPrompt(batch);
-        const responseText = await aiClient.call(prompt);
+        const prompt = buildScoringPrompt(batch, projects);
+        const responseText = await aiClient.call(prompt, 'scoring');
         const parsed = parseJsonResponse<GeminiScoringResult>(responseText);
-        
-        if (parsed.results && Array.isArray(parsed.results)) {
-          for (const result of parsed.results) {
-            const clamp = (v: number) => Math.min(10, Math.max(1, Math.round(v)));
-            const cat = (validCategories.has(result.category) ? result.category : 'other') as CategoryId;
-            allScores.set(result.index, {
-              relevance: clamp(result.relevance),
-              quality: clamp(result.quality),
-              timeliness: clamp(result.timeliness),
-              category: cat,
-              keywords: Array.isArray(result.keywords) ? result.keywords.slice(0, 4) : [],
-            });
+
+        if (parsed && Array.isArray(parsed.results)) {
+          const batchIndices = batch.map(item => item.index);
+          const allowedIndices = new Set(batchIndices);
+          let skippedResults = 0;
+          for (const rawResult of parsed.results) {
+            const result = validateArticleScore(rawResult, allowedIndices, batchIndices, validCategories, knownProjectIds);
+            if (!result) {
+              skippedResults++;
+              continue;
+            }
+            allScores.set(result.index, result.score);
+          }
+          if (skippedResults > 0) {
+            console.warn(`[digest] Scoring batch: skipped ${skippedResults} invalid response item(s)`);
           }
         }
       } catch (error) {
         console.warn(`[digest] Scoring batch failed: ${error instanceof Error ? error.message : String(error)}`);
         for (const item of batch) {
-          allScores.set(item.index, { relevance: 5, quality: 5, timeliness: 5, category: 'other', keywords: [] });
+          allScores.set(item.index, { relevance: 5, quality: 5, timeliness: 5, category: 'other', keywords: [], projectMatches: [] });
         }
       }
     });
@@ -1013,7 +1415,7 @@ async function summarizeArticles(
     const promises = batchGroup.map(async (batch) => {
       try {
         const prompt = buildSummaryPrompt(batch, lang);
-        const responseText = await aiClient.call(prompt);
+        const responseText = await aiClient.call(prompt, 'summary');
         const parsed = parseJsonResponse<GeminiSummaryResult>(responseText);
         
         if (parsed.results && Array.isArray(parsed.results)) {
@@ -1068,7 +1470,7 @@ ${articleList}
 直接返回纯文本总结，不要 JSON，不要 markdown 格式。`;
 
   try {
-    const text = await aiClient.call(prompt);
+    const text = await aiClient.call(prompt, 'highlights');
     return text.trim();
   } catch (error) {
     console.warn(`[digest] Highlights generation failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -1223,6 +1625,105 @@ function renderDesignSection(designArticles: DesignArticle[]): string {
   return section;
 }
 
+function getBestProjectMatch(article: { breakdown: ArticleScore }): ProjectMatch | undefined {
+  return article.breakdown.projectMatches[0];
+}
+
+function getGenericScore(score: ArticleScore): number {
+  return score.relevance + score.quality + score.timeliness;
+}
+
+function getProjectAwareScore(score: ArticleScore): number {
+  const bestMatch = score.projectMatches[0];
+  if (!bestMatch) return getGenericScore(score);
+  return score.quality + score.timeliness + bestMatch.projectRelevance * 2 + bestMatch.actionability;
+}
+
+function compareGenericRank(a: { genericScore: number; pubDate: Date }, b: { genericScore: number; pubDate: Date }): number {
+  return b.genericScore - a.genericScore || b.pubDate.getTime() - a.pubDate.getTime();
+}
+
+function compareProjectRank(
+  a: { breakdown: ArticleScore; projectAwareScore: number; genericScore: number; pubDate: Date },
+  b: { breakdown: ArticleScore; projectAwareScore: number; genericScore: number; pubDate: Date }
+): number {
+  const bestA = getBestProjectMatch(a);
+  const bestB = getBestProjectMatch(b);
+  return (bestB?.projectRelevance || 0) - (bestA?.projectRelevance || 0)
+    || (bestB?.actionability || 0) - (bestA?.actionability || 0)
+    || b.projectAwareScore - a.projectAwareScore
+    || b.genericScore - a.genericScore
+    || b.pubDate.getTime() - a.pubDate.getTime();
+}
+
+function rankArticles<T extends { breakdown: ArticleScore; genericScore: number; projectAwareScore: number; pubDate: Date }>(
+  articles: T[],
+  topN: number
+): T[] {
+  const matched = articles.filter(article => article.breakdown.projectMatches.length > 0);
+
+  if (matched.length >= 3) {
+    const matchedFirst = [...matched].sort(compareProjectRank);
+    const unmatched = articles
+      .filter(article => article.breakdown.projectMatches.length === 0)
+      .sort(compareGenericRank);
+    return [...matchedFirst, ...unmatched].slice(0, topN);
+  }
+
+  return [...articles]
+    .sort((a, b) =>
+      b.projectAwareScore - a.projectAwareScore
+      || b.genericScore - a.genericScore
+      || b.pubDate.getTime() - a.pubDate.getTime()
+    )
+    .slice(0, topN);
+}
+
+function renderProjectIntelligenceSection(articles: ScoredArticle[], projects: ProjectConfig[]): string {
+  if (projects.length === 0) return '';
+
+  const projectById = new Map(projects.map(project => [project.id, project]));
+  const grouped = new Map<string, Array<{ article: ScoredArticle; match: ProjectMatch }>>();
+
+  for (const article of articles) {
+    for (const match of article.projectMatches) {
+      if (!projectById.has(match.projectId)) continue;
+      const list = grouped.get(match.projectId) || [];
+      list.push({ article, match });
+      grouped.set(match.projectId, list);
+    }
+  }
+
+  if (grouped.size === 0) return '';
+
+  let section = `## 🎯 项目相关情报\n\n`;
+
+  for (const project of projects) {
+    const items = grouped.get(project.id);
+    if (!items || items.length === 0) continue;
+
+    items.sort((a, b) =>
+      b.match.projectRelevance - a.match.projectRelevance
+      || b.match.actionability - a.match.actionability
+      || b.article.score - a.article.score
+    );
+
+    section += `### ${project.name}\n\n`;
+    for (const { article, match } of items) {
+      section += `#### [${article.titleZh || article.title}](${article.link})\n\n`;
+      section += `${article.summary}\n\n`;
+      section += `- **项目相关性**：${match.projectRelevance}/10\n`;
+      section += `- **可落地性**：${match.actionability}/10\n`;
+      section += `- **为什么相关**：${match.whyRelevant || '模型未提供具体说明。'}\n`;
+      section += `- **建议动作**：${match.recommendedAction || '加入后续人工评估清单。'}\n`;
+      section += `- **来源**：${article.sourceName}\n\n`;
+    }
+  }
+
+  section += `---\n\n`;
+  return section;
+}
+
 // ============================================================================
 // Report Generation
 // ============================================================================
@@ -1234,15 +1735,16 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
   filteredArticles: number;
   hours: number;
   lang: string;
-}, clawfeedContent: string, trendingRepos: TrendingRepo[], designArticles: DesignArticle[]): string {
+}, clawfeedContent: string, trendingRepos: TrendingRepo[], designArticles: DesignArticle[], projects: ProjectConfig[]): string {
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
+  const hasProjectIntelligence = projects.length > 0 && articles.some(article => article.projectMatches.length > 0);
 
   let report = `# 📰 AI 资讯每日精选 — ${dateStr}\n\n`;
   report += `> 汇聚 ${stats.totalFeeds}+ 技术博客、X/Twitter、Hacker News、Reddit、Product Hunt、\n`;
   report += `> Lobste.rs、ClawFeed 日报及 GitHub Trending，经 AI 评分筛选。\n`;
   report += `>\n`;
-  report += `> **本期内容**：🏆 今日必读 · 🌐 ClawFeed 日报 · 🔥 GitHub Trending · 📂 分类精选 · 🎨 设计与生成式 AI · 📊 数据概览\n\n`;
+  report += `> **本期内容**：🏆 今日必读 · 🌐 ClawFeed 日报 · 🔥 GitHub Trending · 📂 分类精选 · 🎨 设计与生成式 AI · 📊 数据概览${hasProjectIntelligence ? ' · 🎯 项目相关情报' : ''}\n\n`;
 
   // ── Today's Highlights ──
   if (highlights) {
@@ -1362,6 +1864,8 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
 
   report += `---\n\n`;
 
+  report += renderProjectIntelligenceSection(articles, projects);
+
   // ── Footer ──
   report += `*生成于 ${dateStr} ${now.toISOString().split('T')[1]?.slice(0, 5) || ''} | 汇聚 ${stats.totalFeeds} 个技术博客、X/Twitter、Hacker News、Reddit、Product Hunt、Lobste.rs、ClawFeed 日报及 GitHub Trending，经 AI 评分筛选出 Top ${articles.length} 精华内容*\n`;
 
@@ -1386,12 +1890,16 @@ Options:
   --help          Show this help
 
 Environment:
-  GEMINI_API_KEY   Optional but recommended. Get one at https://aistudio.google.com/apikey
-  OPENAI_API_KEY   Optional fallback key for OpenAI-compatible APIs
-  OPENAI_API_BASE  Optional fallback base URL (default: https://api.openai.com/v1)
-  OPENAI_MODEL     Optional fallback model (default: deepseek-chat for DeepSeek base, else gpt-4o-mini)
+  GEMINI_API_KEY   Optional Gemini provider key. Get one at https://aistudio.google.com/apikey
+  OPENAI_API_KEY   Optional OpenAI-compatible provider key
+  OPENAI_API_BASE  Optional OpenAI-compatible base URL (default: https://api.openai.com/v1)
+  OPENAI_MODEL     Optional OpenAI-compatible model (default: deepseek-v4-flash for DeepSeek base, else gpt-4o-mini)
+  AI_PRIMARY_PROVIDER Preferred provider: gemini, openai, or deepseek (default: gemini)
+  AI_REQUEST_TIMEOUT_MS Per-request timeout in milliseconds (default: 180000)
+  DEEPSEEK_THINKING_TASKS Comma-separated tasks: scoring,summary,highlights,design; all or none (default: scoring,highlights)
   RSSHUB_BASE_URL  RSSHub instance URL for X/Twitter feeds (default: https://rsshub.app)
   X_ACCOUNTS       Comma-separated X/Twitter accounts to follow (e.g. karpathy,sama,ylecun)
+  PROJECTS_CONFIG_PATH Optional project profile JSON path (default: config/projects.json)
 
 Examples:
   bun scripts/digest.ts --hours 24 --top-n 10 --lang zh
@@ -1426,6 +1934,10 @@ async function main(): Promise<void> {
   const openaiApiKey = process.env.OPENAI_API_KEY;
   const openaiApiBase = process.env.OPENAI_API_BASE;
   const openaiModel = process.env.OPENAI_MODEL;
+  const deepseekThinkingTasks = parseDeepSeekThinkingTasks(process.env.DEEPSEEK_THINKING_TASKS);
+  const primaryProvider = parseAIPrimaryProvider(process.env.AI_PRIMARY_PROVIDER);
+  const requestTimeoutMs = parseAIRequestTimeout(process.env.AI_REQUEST_TIMEOUT_MS);
+  const providerOrder = resolveAIProviderOrder(primaryProvider, Boolean(geminiApiKey), Boolean(openaiApiKey));
 
   if (!geminiApiKey && !openaiApiKey) {
     console.error('[digest] Error: Missing API key. Set GEMINI_API_KEY and/or OPENAI_API_KEY.');
@@ -1438,6 +1950,9 @@ async function main(): Promise<void> {
     openaiApiKey,
     openaiApiBase,
     openaiModel,
+    deepseekThinkingTasks,
+    primaryProvider,
+    requestTimeoutMs,
   });
   
   if (!outputPath) {
@@ -1450,13 +1965,24 @@ async function main(): Promise<void> {
   console.log(`[digest] Top N: ${topN}`);
   console.log(`[digest] Language: ${lang}`);
   console.log(`[digest] Output: ${outputPath}`);
-  console.log(`[digest] AI provider: ${geminiApiKey ? 'Gemini (primary)' : 'OpenAI-compatible (primary)'}`);
+  console.log(`[digest] AI provider: ${providerOrder[0] === 'openai' ? 'OpenAI-compatible' : 'Gemini'} (primary)`);
+  if (providerOrder[1]) {
+    console.log(`[digest] AI fallback: ${providerOrder[1] === 'openai' ? 'OpenAI-compatible' : 'Gemini'}`);
+  }
+  console.log(`[digest] AI request timeout: ${Math.round(requestTimeoutMs / 1000)}s`);
   if (openaiApiKey) {
     const resolvedBase = (openaiApiBase?.trim() || OPENAI_DEFAULT_API_BASE).replace(/\/+$/, '');
     const resolvedModel = openaiModel?.trim() || inferOpenAIModel(resolvedBase);
-    console.log(`[digest] Fallback: ${resolvedBase} (model=${resolvedModel})`);
+    const openaiRole = providerOrder[0] === 'openai' ? 'primary' : 'fallback';
+    console.log(`[digest] OpenAI-compatible ${openaiRole}: ${resolvedBase} (model=${resolvedModel})`);
+    if (resolvedBase.toLowerCase().includes('api.deepseek.com') && resolvedModel.toLowerCase().startsWith('deepseek-v4-')) {
+      const taskList = [...deepseekThinkingTasks].join(', ') || 'none';
+      console.log(`[digest] DeepSeek thinking tasks: ${taskList}`);
+    }
   }
   console.log('');
+
+  const projects = await loadProjects();
 
   const xFeeds = buildXFeeds();
   const allFeeds = [...RSS_FEEDS, ...xFeeds];
@@ -1489,21 +2015,33 @@ async function main(): Promise<void> {
   }
   
   console.log(`[digest] Step 3/5: AI scoring ${recentArticles.length} articles...`);
-  const scores = await scoreArticlesWithAI(recentArticles, aiClient);
+  const scores = await scoreArticlesWithAI(recentArticles, aiClient, projects);
   
   const scoredArticles = recentArticles.map((article, index) => {
-    const score = scores.get(index) || { relevance: 5, quality: 5, timeliness: 5, category: 'other' as CategoryId, keywords: [] };
+    const score = scores.get(index) || { relevance: 5, quality: 5, timeliness: 5, category: 'other' as CategoryId, keywords: [], projectMatches: [] };
+    const genericScore = getGenericScore(score);
+    const projectAwareScore = getProjectAwareScore(score);
     return {
       ...article,
-      totalScore: score.relevance + score.quality + score.timeliness,
+      genericScore,
+      projectAwareScore,
+      totalScore: projectAwareScore,
       breakdown: score,
     };
   });
   
-  scoredArticles.sort((a, b) => b.totalScore - a.totalScore);
-  const topArticles = scoredArticles.slice(0, topN);
+  const projectMatchedCount = scoredArticles.filter(article => article.breakdown.projectMatches.length > 0).length;
+  if (projects.length > 0) {
+    console.log(`[digest] Project-matched articles: ${projectMatchedCount}/${scoredArticles.length}`);
+    for (const project of projects) {
+      const count = scoredArticles.filter(article => article.breakdown.projectMatches.some(match => match.projectId === project.id)).length;
+      console.log(`[digest] Project ${project.id}: ${count} matched articles`);
+    }
+  }
+
+  const topArticles = rankArticles(scoredArticles, topN);
   
-  console.log(`[digest] Top ${topN} articles selected (score range: ${topArticles[topArticles.length - 1]?.totalScore || 0} - ${topArticles[0]?.totalScore || 0})`);
+  console.log(`[digest] Top ${topN} articles selected (score range: ${topArticles[topArticles.length - 1]?.projectAwareScore || 0} - ${topArticles[0]?.projectAwareScore || 0})`);
   
   console.log(`[digest] Step 4/5: Generating AI summaries...`);
   const indexedTopArticles = topArticles.map((a, i) => ({ ...a, index: i }));
@@ -1518,7 +2056,7 @@ async function main(): Promise<void> {
       description: a.description,
       sourceName: a.sourceName,
       sourceUrl: a.sourceUrl,
-      score: a.totalScore,
+      score: a.projectAwareScore,
       scoreBreakdown: {
         relevance: a.breakdown.relevance,
         quality: a.breakdown.quality,
@@ -1526,6 +2064,7 @@ async function main(): Promise<void> {
       },
       category: a.breakdown.category,
       keywords: a.breakdown.keywords,
+      projectMatches: a.breakdown.projectMatches,
       titleZh: sm.titleZh,
       summary: sm.summary,
       reason: sm.reason,
@@ -1537,7 +2076,8 @@ async function main(): Promise<void> {
 
   // ── Design & Generative AI candidates ──
   const seenDesignTitles = new Set<string>();
-  const designCandidates = scoredArticles
+  const designCandidates = [...scoredArticles]
+    .sort(compareGenericRank)
     .filter(a => matchesDesignKeywords({ title: a.title, keywords: a.breakdown.keywords }))
     .filter(a => {
       const key = a.title.toLowerCase().trim();
@@ -1559,7 +2099,7 @@ async function main(): Promise<void> {
     filteredArticles: recentArticles.length,
     hours,
     lang,
-  }, clawfeedContent, trendingRepos, designArticles);
+  }, clawfeedContent, trendingRepos, designArticles, projects);
   
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, report);
