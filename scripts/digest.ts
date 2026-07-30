@@ -17,8 +17,29 @@ const DEFAULT_AI_REQUEST_TIMEOUT_MS = 180_000;
 const DEFAULT_DEEPSEEK_THINKING_TASKS = 'scoring,highlights';
 const DEFAULT_PROJECTS_CONFIG_PATH = 'config/projects.json';
 const PROJECT_MATCH_RELEVANCE_THRESHOLD = 6;
+const PROJECT_INTELLIGENCE_RELEVANCE_THRESHOLD = 7;
+const PROJECT_INTELLIGENCE_QUALITY_THRESHOLD = 5;
+const MAX_PROJECT_INTELLIGENCE_PER_PROJECT = 2;
 const MAX_PROJECT_MATCHES_PER_ARTICLE = 5;
 const MAX_PROJECT_TEXT_LENGTH = 240;
+const AGGREGATOR_HOSTS = new Set([
+  'news.ycombinator.com',
+  'reddit.com',
+  'www.reddit.com',
+  'old.reddit.com',
+  'lobste.rs',
+  'x.com',
+  'twitter.com',
+]);
+const EVENT_GENERIC_TOKENS = new Set([
+  'ai', 'agent', 'agents', 'article', 'attack', 'blog', 'breach', 'incident',
+  'intrusion', 'issue', 'model', 'models', 'new', 'post', 'sandbox', 'security',
+  'system', 'systems', 'technical', 'technology', 'tool', 'tools',
+]);
+const EVENT_STOP_WORDS = new Set([
+  'about', 'after', 'against', 'from', 'have', 'including', 'into', 'more',
+  'than', 'that', 'their', 'the', 'this', 'with', 'without', 'your',
+]);
 
 // 96 RSS feeds from Hacker News Popularity Contest 2025 (curated by Karpathy)
 const RSS_FEEDS: Array<{ name: string; xmlUrl: string; htmlUrl: string }> = [
@@ -197,6 +218,9 @@ interface ProjectConfig {
   id: string;
   name: string;
   goal: string;
+  requiredSignals: string[];
+  supportingSignals: string[];
+  negativeSignals: string[];
   keywords: string[];
   entities: string[];
   exclude: string[];
@@ -1060,6 +1084,9 @@ function validateProjectEntry(value: unknown, index: number): ProjectConfig | nu
     id,
     name,
     goal,
+    requiredSignals: normalizeStringArray(record.requiredSignals),
+    supportingSignals: normalizeStringArray(record.supportingSignals),
+    negativeSignals: normalizeStringArray(record.negativeSignals),
     keywords,
     entities: normalizeStringArray(record.entities),
     exclude: normalizeStringArray(record.exclude),
@@ -1189,6 +1216,9 @@ function buildScoringPrompt(
 
 ${projects.map(project => `### ${project.id}: ${project.name}
 - 目标: ${project.goal}
+- 核心必要信号: ${project.requiredSignals.length > 0 ? project.requiredSignals.join(', ') : '无额外限制'}
+- 辅助信号: ${project.supportingSignals.length > 0 ? project.supportingSignals.join(', ') : '无'}
+- 负面信号: ${project.negativeSignals.length > 0 ? project.negativeSignals.join(', ') : '无'}
 - 关键词: ${project.keywords.join(', ')}
 - 相关实体: ${project.entities.length > 0 ? project.entities.join(', ') : '无'}
 - 排除主题: ${project.exclude.length > 0 ? project.exclude.join(', ') : '无'}`).join('\n\n')}
@@ -1198,11 +1228,13 @@ ${projects.map(project => `### ${project.id}: ${project.name}
 2. 只返回 projectRelevance >= 6 的项目匹配。
 3. projectId 必须来自上方项目 ID，不能编造。
 4. 关键词重合本身不足以给高分，必须结合文章主题判断。
-5. 纯营销、融资或空泛观点内容不应获得高项目分。
-6. 不要编造标题或描述没有支持的信息。
-7. whyRelevant 必须用中文说明它为何与项目相关。
-8. recommendedAction 必须用中文给出具体下一步动作。
-9. 具体动作可以包括：加入评测候选池、与当前架构对比、阅读技术文档、复现实验、增加安全检查、跟踪上游项目等。
+5. 配置了核心必要信号时，文章标题或描述必须明确支持至少一个核心必要信号；辅助信号或实体名称不能单独构成匹配。
+6. 出现负面信号或排除主题，且没有明确核心必要信号时，不得返回项目匹配。
+7. 纯营销、融资或空泛观点内容不应获得高项目分。
+8. 不要编造标题或描述没有支持的信息。
+9. whyRelevant 必须用中文指出文章中的具体证据，并说明它为何与项目相关。
+10. recommendedAction 必须用中文给出具体下一步动作。
+11. 具体动作可以包括：加入评测候选池、与当前架构对比、阅读技术文档、复现实验、增加安全检查、跟踪上游项目等。
 `;
 
   const projectJsonExample = projects.length === 0
@@ -1679,6 +1711,171 @@ function rankArticles<T extends { breakdown: ArticleScore; genericScore: number;
     .slice(0, topN);
 }
 
+interface ProjectIntelligenceCandidate<T> {
+  article: T;
+  matches: ProjectMatch[];
+}
+
+interface ProjectEventCandidate<T> {
+  article: T;
+  match: ProjectMatch;
+}
+
+function tokenizeEventText(value: string): Set<string> {
+  const normalized = value
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/hugging\s*face/g, 'hugging face')
+    .replace(/[^a-z0-9]+/g, ' ');
+
+  return new Set(normalized
+    .split(/\s+/)
+    .map(token => token === 'agents' ? 'agent' : token === 'models' ? 'model' : token === 'systems' ? 'system' : token)
+    .filter(token => token.length >= 3 && !EVENT_STOP_WORDS.has(token)));
+}
+
+function intersectionSize(a: Set<string>, b: Set<string>): number {
+  let count = 0;
+  for (const value of a) {
+    if (b.has(value)) count++;
+  }
+  return count;
+}
+
+function overlapCoefficient(a: Set<string>, b: Set<string>): number {
+  const denominator = Math.min(a.size, b.size);
+  return denominator === 0 ? 0 : intersectionSize(a, b) / denominator;
+}
+
+export function isSameProjectEvent<T extends { title: string; description?: string; breakdown: ArticleScore }>(a: T, b: T): boolean {
+  const titleA = tokenizeEventText(a.title);
+  const titleB = tokenizeEventText(b.title);
+  const sharedTitleTokens = intersectionSize(titleA, titleB);
+  if (sharedTitleTokens >= 4 && overlapCoefficient(titleA, titleB) >= 0.6) return true;
+
+  const keywordsA = tokenizeEventText(a.breakdown.keywords.join(' '));
+  const keywordsB = tokenizeEventText(b.breakdown.keywords.join(' '));
+  const sharedKeywords = Array.from(keywordsA).filter(token => keywordsB.has(token));
+  const sharedDistinctiveKeywords = sharedKeywords.filter(token => !EVENT_GENERIC_TOKENS.has(token));
+
+  if (sharedKeywords.length >= 4
+    && sharedDistinctiveKeywords.length >= 1
+    && overlapCoefficient(keywordsA, keywordsB) >= 0.5) return true;
+
+  const contextA = tokenizeEventText(`${a.title} ${a.description || ''} ${a.breakdown.keywords.join(' ')}`);
+  const contextB = tokenizeEventText(`${b.title} ${b.description || ''} ${b.breakdown.keywords.join(' ')}`);
+  const sharedContext = Array.from(contextA).filter(token => contextB.has(token));
+  const sharedDistinctiveContext = sharedContext.filter(token => !EVENT_GENERIC_TOKENS.has(token));
+
+  return sharedContext.length >= 6 && sharedDistinctiveContext.length >= 3;
+}
+
+function getHostname(value: string): string {
+  try {
+    return new URL(value).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function getDomainIdentity(hostname: string): string {
+  const parts = hostname.replace(/^www\./, '').split('.').filter(Boolean);
+  if (parts.length < 2) return parts[0] || '';
+  return parts[parts.length - 2] || '';
+}
+
+export function getSourceAuthorityScore(
+  article: { title: string; description: string; link: string; sourceUrl: string; breakdown?: ArticleScore },
+  eventContext = ''
+): number {
+  const linkHostname = getHostname(article.link);
+  if (!linkHostname || AGGREGATOR_HOSTS.has(linkHostname)) return 0;
+
+  let score = 2;
+  const sourceHostname = getHostname(article.sourceUrl);
+  if (sourceHostname && (sourceHostname === linkHostname || linkHostname.endsWith(`.${sourceHostname}`))) {
+    score += 1;
+  }
+
+  const domainIdentity = getDomainIdentity(linkHostname).replace(/[^a-z0-9]/g, '');
+  const articleText = `${article.title} ${article.description} ${article.breakdown?.keywords.join(' ') || ''} ${eventContext}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+  if (domainIdentity.length >= 4 && articleText.includes(domainIdentity)) {
+    score += 2;
+  }
+
+  return score;
+}
+
+function compareProjectEventCandidates<
+  T extends { title: string; description: string; link: string; sourceUrl: string; breakdown: ArticleScore; genericScore: number; projectAwareScore: number; pubDate: Date }
+>(a: ProjectEventCandidate<T>, b: ProjectEventCandidate<T>, eventContext = ''): number {
+  return getSourceAuthorityScore(b.article, eventContext) - getSourceAuthorityScore(a.article, eventContext)
+    || b.article.breakdown.quality - a.article.breakdown.quality
+    || b.match.projectRelevance - a.match.projectRelevance
+    || b.match.actionability - a.match.actionability
+    || b.article.projectAwareScore - a.article.projectAwareScore
+    || b.article.genericScore - a.article.genericScore
+    || b.article.pubDate.getTime() - a.article.pubDate.getTime();
+}
+
+export function selectProjectIntelligenceCandidates<
+  T extends { title: string; description: string; link: string; sourceUrl: string; breakdown: ArticleScore; genericScore: number; projectAwareScore: number; pubDate: Date }
+>(articles: T[], projects: ProjectConfig[]): Array<ProjectIntelligenceCandidate<T>> {
+  const selectedByArticle = new Map<T, ProjectMatch[]>();
+
+  for (const project of projects) {
+    const modelMatches = articles.flatMap(article => {
+      const match = article.breakdown.projectMatches.find(item => item.projectId === project.id);
+      return match ? [{ article, match }] : [];
+    });
+    const relevanceQualified = modelMatches.filter(({ match }) =>
+      match.projectRelevance >= PROJECT_INTELLIGENCE_RELEVANCE_THRESHOLD
+    );
+    const eligible = relevanceQualified.filter(({ article }) =>
+      article.breakdown.quality >= PROJECT_INTELLIGENCE_QUALITY_THRESHOLD
+    );
+    const eventClusters: Array<Array<ProjectEventCandidate<T>>> = [];
+    for (const candidate of eligible) {
+      const cluster = eventClusters.find(items =>
+        items.some(item => isSameProjectEvent(item.article, candidate.article))
+      );
+      if (cluster) cluster.push(candidate);
+      else eventClusters.push([candidate]);
+    }
+    const eventRepresentatives = eventClusters
+      .map(cluster => {
+        const eventContext = cluster
+          .map(({ article }) => `${article.title} ${article.description} ${article.breakdown.keywords.join(' ')}`)
+          .join(' ');
+        return [...cluster].sort((a, b) => compareProjectEventCandidates(a, b, eventContext))[0]!;
+      })
+      .sort((a, b) =>
+        b.match.projectRelevance - a.match.projectRelevance
+        || b.match.actionability - a.match.actionability
+        || b.article.projectAwareScore - a.article.projectAwareScore
+        || getSourceAuthorityScore(b.article) - getSourceAuthorityScore(a.article)
+        || b.article.genericScore - a.article.genericScore
+        || b.article.pubDate.getTime() - a.article.pubDate.getTime()
+      );
+    const selected = eventRepresentatives
+      .slice(0, MAX_PROJECT_INTELLIGENCE_PER_PROJECT);
+
+    console.log(
+      `[digest] Project ${project.id}: matched=${modelMatches.length}, relevance>=${PROJECT_INTELLIGENCE_RELEVANCE_THRESHOLD}=${relevanceQualified.length}, quality>=${PROJECT_INTELLIGENCE_QUALITY_THRESHOLD}=${eligible.length}, uniqueEvents=${eventClusters.length}, duplicates=${eligible.length - eventClusters.length}, selected=${selected.length}`
+    );
+
+    for (const { article, match } of selected) {
+      const matches = selectedByArticle.get(article) || [];
+      matches.push(match);
+      selectedByArticle.set(article, matches);
+    }
+  }
+
+  return Array.from(selectedByArticle, ([article, matches]) => ({ article, matches }));
+}
+
 function renderProjectIntelligenceSection(articles: ScoredArticle[], projects: ProjectConfig[]): string {
   if (projects.length === 0) return '';
 
@@ -1735,10 +1932,10 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
   filteredArticles: number;
   hours: number;
   lang: string;
-}, clawfeedContent: string, trendingRepos: TrendingRepo[], designArticles: DesignArticle[], projects: ProjectConfig[]): string {
+}, clawfeedContent: string, trendingRepos: TrendingRepo[], designArticles: DesignArticle[], projects: ProjectConfig[], projectArticles: ScoredArticle[]): string {
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
-  const hasProjectIntelligence = projects.length > 0 && articles.some(article => article.projectMatches.length > 0);
+  const hasProjectIntelligence = projects.length > 0 && projectArticles.length > 0;
 
   let report = `# 📰 AI 资讯每日精选 — ${dateStr}\n\n`;
   report += `> 汇聚 ${stats.totalFeeds}+ 技术博客、X/Twitter、Hacker News、Reddit、Product Hunt、\n`;
@@ -1864,7 +2061,7 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
 
   report += `---\n\n`;
 
-  report += renderProjectIntelligenceSection(articles, projects);
+  report += renderProjectIntelligenceSection(projectArticles, projects);
 
   // ── Footer ──
   report += `*生成于 ${dateStr} ${now.toISOString().split('T')[1]?.slice(0, 5) || ''} | 汇聚 ${stats.totalFeeds} 个技术博客、X/Twitter、Hacker News、Reddit、Product Hunt、Lobste.rs、ClawFeed 日报及 GitHub Trending，经 AI 评分筛选出 Top ${articles.length} 精华内容*\n`;
@@ -2033,43 +2230,60 @@ async function main(): Promise<void> {
   const projectMatchedCount = scoredArticles.filter(article => article.breakdown.projectMatches.length > 0).length;
   if (projects.length > 0) {
     console.log(`[digest] Project-matched articles: ${projectMatchedCount}/${scoredArticles.length}`);
-    for (const project of projects) {
-      const count = scoredArticles.filter(article => article.breakdown.projectMatches.some(match => match.projectId === project.id)).length;
-      console.log(`[digest] Project ${project.id}: ${count} matched articles`);
-    }
   }
 
   const topArticles = rankArticles(scoredArticles, topN);
+  const projectCandidates = selectProjectIntelligenceCandidates(scoredArticles, projects);
   
   console.log(`[digest] Top ${topN} articles selected (score range: ${topArticles[topArticles.length - 1]?.projectAwareScore || 0} - ${topArticles[0]?.projectAwareScore || 0})`);
   
   console.log(`[digest] Step 4/5: Generating AI summaries...`);
-  const indexedTopArticles = topArticles.map((a, i) => ({ ...a, index: i }));
-  const summaries = await summarizeArticles(indexedTopArticles, aiClient, lang);
-  
-  const finalArticles: ScoredArticle[] = topArticles.map((a, i) => {
-    const sm = summaries.get(i) || { titleZh: a.title, summary: a.description.slice(0, 200), reason: '' };
+  const summaryArticles = [...topArticles];
+  const summaryArticleSet = new Set(summaryArticles);
+  for (const { article } of projectCandidates) {
+    if (summaryArticleSet.has(article)) continue;
+    summaryArticleSet.add(article);
+    summaryArticles.push(article);
+  }
+  const additionalProjectSummaries = summaryArticles.length - topArticles.length;
+  console.log(`[digest] Project intelligence: ${projectCandidates.length} unique articles, ${additionalProjectSummaries} additional summaries outside Top ${topN}`);
+
+  const summaryIndexByArticle = new Map(summaryArticles.map((article, index) => [article, index]));
+  const indexedSummaryArticles = summaryArticles.map((article, index) => ({ ...article, index }));
+  const summaries = await summarizeArticles(indexedSummaryArticles, aiClient, lang);
+
+  const toScoredArticle = (
+    article: (typeof scoredArticles)[number],
+    projectMatches: ProjectMatch[]
+  ): ScoredArticle => {
+    const summaryIndex = summaryIndexByArticle.get(article);
+    const sm = summaryIndex === undefined
+      ? { titleZh: article.title, summary: article.description.slice(0, 200), reason: '' }
+      : summaries.get(summaryIndex) || { titleZh: article.title, summary: article.description.slice(0, 200), reason: '' };
     return {
-      title: a.title,
-      link: a.link,
-      pubDate: a.pubDate,
-      description: a.description,
-      sourceName: a.sourceName,
-      sourceUrl: a.sourceUrl,
-      score: a.projectAwareScore,
+      title: article.title,
+      link: article.link,
+      pubDate: article.pubDate,
+      description: article.description,
+      sourceName: article.sourceName,
+      sourceUrl: article.sourceUrl,
+      score: article.projectAwareScore,
       scoreBreakdown: {
-        relevance: a.breakdown.relevance,
-        quality: a.breakdown.quality,
-        timeliness: a.breakdown.timeliness,
+        relevance: article.breakdown.relevance,
+        quality: article.breakdown.quality,
+        timeliness: article.breakdown.timeliness,
       },
-      category: a.breakdown.category,
-      keywords: a.breakdown.keywords,
-      projectMatches: a.breakdown.projectMatches,
+      category: article.breakdown.category,
+      keywords: article.breakdown.keywords,
+      projectMatches,
       titleZh: sm.titleZh,
       summary: sm.summary,
       reason: sm.reason,
     };
-  });
+  };
+
+  const finalArticles = topArticles.map(article => toScoredArticle(article, article.breakdown.projectMatches));
+  const projectIntelligenceArticles = projectCandidates.map(({ article, matches }) => toScoredArticle(article, matches));
   
   console.log(`[digest] Step 5/5: Generating today's highlights...`);
   const highlights = await generateHighlights(finalArticles, aiClient, lang);
@@ -2099,7 +2313,7 @@ async function main(): Promise<void> {
     filteredArticles: recentArticles.length,
     hours,
     lang,
-  }, clawfeedContent, trendingRepos, designArticles, projects);
+  }, clawfeedContent, trendingRepos, designArticles, projects, projectIntelligenceArticles);
   
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, report);
@@ -2120,7 +2334,9 @@ async function main(): Promise<void> {
   }
 }
 
-await main().catch((err) => {
-  console.error(`[digest] Fatal error: ${err instanceof Error ? err.message : String(err)}`);
-  process.exit(1);
-});
+if (import.meta.main) {
+  await main().catch((err) => {
+    console.error(`[digest] Fatal error: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  });
+}
