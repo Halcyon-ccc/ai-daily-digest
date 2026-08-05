@@ -191,9 +191,28 @@ Fork 本仓库后，在 **Settings → Secrets and variables → Actions** 中�
 
 ## 自定义
 
+### 配置项目领域
+
+项目画像保存在 `config/projects.json`。每个项目可使用 `strict`、`balanced` 或 `broad` 筛选预设，并可覆写相关性、文章质量、可落地性和最大条数阈值。
+
+```bash
+# 校验项目和来源配置
+bun scripts/projects.ts validate
+
+# 快速添加一个领域
+bun scripts/projects.ts add \
+  --id multi-agent-evaluation \
+  --name "多 Agent 评测" \
+  --goal "跟踪多 Agent 协作效果和评测方法" \
+  --preset strict \
+  --groups "multi-agent,agent team;benchmark,evaluation"
+```
+
+需要精细调整时，可追加 `--min-match`、`--min-section`、`--min-quality`、`--min-actionability` 或 `--max-items`；取值范围均为 1-10。
+
 ### 修改 RSS 源
 
-编辑 `scripts/digest.ts` 中的 `RSS_FEEDS` 数组，添加或移除 RSS 源。
+在 `config/sources.json` 中添加、停用或调整额外 RSS/Atom 源。来源可标记为 `first-party`、`research`、`community` 或 `aggregator`，并通过 `tags` 与项目偏好关联。内置通用来源仍保留在 `scripts/digest.ts`。
 
 ### 修改 X 账号
 
