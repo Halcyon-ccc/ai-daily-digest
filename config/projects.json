@@ -4,6 +4,34 @@
       "id": "agent-security",
       "name": "Agent 基座安全与合规",
       "goal": "跟踪 Agent 安全护栏、工具权限控制、隐私保护、审计和 Prompt Injection 防御方案",
+      "requiredSignals": [
+        "AI agent",
+        "agentic system",
+        "autonomous agent",
+        "MCP",
+        "Model Context Protocol",
+        "tool calling",
+        "function calling",
+        "computer use",
+        "browser agent"
+      ],
+      "supportingSignals": [
+        "prompt injection",
+        "tool authorization",
+        "guardrails",
+        "sandboxing",
+        "permission isolation",
+        "PII redaction",
+        "privacy compliance",
+        "audit logging"
+      ],
+      "negativeSignals": [
+        "general cybersecurity",
+        "data breach unrelated to agents",
+        "account compromise unrelated to agents",
+        "ransomware",
+        "cryptocurrency security"
+      ],
       "keywords": [
         "AI agent security",
         "agent security",
@@ -18,19 +46,45 @@
       "entities": [
         "OWASP",
         "MITRE ATLAS",
-        "NIST",
-        "OpenAI",
-        "Anthropic"
+        "NIST AI RMF",
+        "OWASP Agentic Security Initiative"
       ],
       "exclude": [
         "cryptocurrency",
-        "AI image generation"
+        "AI image generation",
+        "general security incidents without an agent, MCP, or tool-execution connection"
       ]
     },
     {
       "id": "asr-voice",
       "name": "ASR 与语音助手",
       "goal": "跟踪语音识别模型、实时转写、低延迟语音助手、评测方法和模型 API",
+      "requiredSignals": [
+        "ASR",
+        "automatic speech recognition",
+        "speech recognition",
+        "speech-to-text",
+        "STT",
+        "transcription",
+        "real-time voice agent"
+      ],
+      "supportingSignals": [
+        "streaming inference",
+        "voice activity detection",
+        "VAD",
+        "speaker diarization",
+        "turn detection",
+        "semantic endpointing",
+        "word error rate",
+        "speech API",
+        "STT benchmark"
+      ],
+      "negativeSignals": [
+        "text-only agent",
+        "music generation",
+        "celebrity voice cloning",
+        "text-to-speech without speech recognition"
+      ],
       "keywords": [
         "ASR",
         "speech recognition",
@@ -39,6 +93,12 @@
         "real-time transcription",
         "voice agent",
         "endpointing",
+        "VAD",
+        "speaker diarization",
+        "turn detection",
+        "semantic endpointing",
+        "speech API",
+        "STT benchmark",
         "WER",
         "Parakeet",
         "Whisper"
@@ -60,14 +120,46 @@
       "id": "ocr-product",
       "name": "商品包装 OCR",
       "goal": "跟踪包装文字识别、字段抽取、品牌匹配、商品知识库和多模态结构化提取",
+      "requiredSignals": [
+        "OCR",
+        "optical character recognition",
+        "scene text recognition",
+        "text spotting",
+        "document understanding",
+        "document parsing",
+        "key information extraction",
+        "visual text extraction"
+      ],
+      "supportingSignals": [
+        "packaging",
+        "product label",
+        "label parsing",
+        "structured extraction",
+        "brand matching",
+        "entity resolution",
+        "product catalog matching",
+        "VLM OCR"
+      ],
+      "negativeSignals": [
+        "license plate recognition",
+        "handwriting only",
+        "image generation",
+        "document summarization without text extraction"
+      ],
       "keywords": [
         "OCR",
+        "text spotting",
         "scene text recognition",
         "packaging OCR",
         "product label recognition",
+        "label parsing",
+        "key information extraction",
+        "document parsing",
         "visual document understanding",
         "structured extraction",
         "entity resolution",
+        "product catalog matching",
+        "VLM OCR",
         "product knowledge base",
         "multimodal extraction"
       ],
