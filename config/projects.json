@@ -4,6 +4,41 @@
       "id": "agent-security",
       "name": "Agent 基座安全与合规",
       "goal": "跟踪 Agent 安全护栏、工具权限控制、隐私保护、审计和 Prompt Injection 防御方案",
+      "requiredSignalGroups": [
+        [
+          "AI agent",
+          "agentic system",
+          "autonomous agent",
+          "MCP",
+          "Model Context Protocol",
+          "tool calling",
+          "function calling",
+          "computer use",
+          "browser agent"
+        ],
+        [
+          "prompt injection",
+          "tool authorization",
+          "authorization",
+          "guardrails",
+          "sandbox escape",
+          "sandboxing",
+          "permission isolation",
+          "privilege escalation",
+          "data exfiltration",
+          "AI safety",
+          "safety test",
+          "safety tests",
+          "security test",
+          "security testing",
+          "social engineering",
+          "PII redaction",
+          "privacy compliance",
+          "audit logging",
+          "security vulnerability",
+          "security exploit"
+        ]
+      ],
       "requiredSignals": [
         "AI agent",
         "agentic system",
@@ -21,12 +56,17 @@
         "guardrails",
         "sandboxing",
         "permission isolation",
+        "AI safety",
+        "security testing",
+        "social engineering",
         "PII redaction",
         "privacy compliance",
         "audit logging"
       ],
       "negativeSignals": [
         "general cybersecurity",
+        "agent architecture without security controls or risks",
+        "agent performance without security controls or risks",
         "data breach unrelated to agents",
         "account compromise unrelated to agents",
         "ransomware",
@@ -52,8 +92,103 @@
       "exclude": [
         "cryptocurrency",
         "AI image generation",
+        "general agent framework updates without explicit security, privacy, authorization, sandboxing, or compliance content",
         "general security incidents without an agent, MCP, or tool-execution connection"
-      ]
+      ],
+      "selection": {
+        "preset": "balanced"
+      },
+      "sourcePreferences": {
+        "preferredTiers": ["first-party", "research"],
+        "preferredTags": ["agent-security", "agent-framework"]
+      }
+    },
+    {
+      "id": "multi-agent-architecture",
+      "name": "多 Agent 架构",
+      "goal": "跟踪多智能体协作、任务编排、通信协议、共享状态、容错和评测方法",
+      "requiredSignalGroups": [
+        [
+          "multi-agent",
+          "multi agent",
+          "agent team",
+          "agent swarm",
+          "Agent2Agent",
+          "A2A"
+        ],
+        [
+          "orchestration",
+          "coordination",
+          "handoff",
+          "task delegation",
+          "supervisor",
+          "shared memory",
+          "inter-agent communication",
+          "workflow graph",
+          "multi-agent workflow",
+          "routing"
+        ]
+      ],
+      "requiredSignals": [
+        "multi-agent",
+        "multi agent",
+        "agent team",
+        "agent swarm",
+        "Agent2Agent",
+        "A2A"
+      ],
+      "supportingSignals": [
+        "orchestration",
+        "coordination",
+        "handoff",
+        "task delegation",
+        "supervisor-worker",
+        "shared memory",
+        "message passing",
+        "workflow graph",
+        "agent communication protocol",
+        "fault tolerance",
+        "multi-agent benchmark"
+      ],
+      "negativeSignals": [
+        "single-agent framework",
+        "generic AI agent launch",
+        "multi-agent reinforcement learning without LLM agent architecture",
+        "game NPC coordination"
+      ],
+      "keywords": [
+        "multi-agent architecture",
+        "multi-agent orchestration",
+        "agent team",
+        "agent swarm",
+        "Agent2Agent",
+        "A2A protocol",
+        "agent handoff",
+        "task delegation",
+        "shared agent memory",
+        "supervisor agent",
+        "multi-agent benchmark"
+      ],
+      "entities": [
+        "Microsoft Agent Framework",
+        "LangGraph",
+        "OpenAI Agents SDK",
+        "Google ADK",
+        "A2A Protocol",
+        "CrewAI"
+      ],
+      "exclude": [
+        "single-agent feature updates without collaboration or orchestration",
+        "multi-agent reinforcement learning without an LLM-agent architecture focus",
+        "marketing claims without architecture, implementation, evaluation, or protocol details"
+      ],
+      "selection": {
+        "preset": "strict"
+      },
+      "sourcePreferences": {
+        "preferredTiers": ["first-party", "research"],
+        "preferredTags": ["multi-agent", "agent-framework", "agent-protocol"]
+      }
     },
     {
       "id": "asr-voice",
@@ -114,7 +249,14 @@
       "exclude": [
         "music generation",
         "celebrity voice cloning"
-      ]
+      ],
+      "selection": {
+        "preset": "balanced"
+      },
+      "sourcePreferences": {
+        "preferredTiers": ["first-party", "research"],
+        "preferredTags": ["speech", "asr"]
+      }
     },
     {
       "id": "ocr-product",
@@ -172,7 +314,14 @@
       "exclude": [
         "license plate recognition",
         "handwriting only"
-      ]
+      ],
+      "selection": {
+        "preset": "balanced"
+      },
+      "sourcePreferences": {
+        "preferredTiers": ["first-party", "research"],
+        "preferredTags": ["ocr", "document-ai", "multimodal"]
+      }
     }
   ]
 }

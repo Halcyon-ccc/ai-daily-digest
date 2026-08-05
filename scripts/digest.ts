@@ -12,14 +12,13 @@ const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini';
 const FEED_FETCH_TIMEOUT_MS = 15_000;
 const FEED_CONCURRENCY = 10;
 const GEMINI_BATCH_SIZE = 10;
+const SCORING_BATCH_SIZE = 8;
+const SCORING_MAX_ATTEMPTS = 2;
 const MAX_CONCURRENT_GEMINI = 2;
 const DEFAULT_AI_REQUEST_TIMEOUT_MS = 180_000;
 const DEFAULT_DEEPSEEK_THINKING_TASKS = 'scoring,highlights';
 const DEFAULT_PROJECTS_CONFIG_PATH = 'config/projects.json';
-const PROJECT_MATCH_RELEVANCE_THRESHOLD = 6;
-const PROJECT_INTELLIGENCE_RELEVANCE_THRESHOLD = 7;
-const PROJECT_INTELLIGENCE_QUALITY_THRESHOLD = 5;
-const MAX_PROJECT_INTELLIGENCE_PER_PROJECT = 2;
+const DEFAULT_SOURCES_CONFIG_PATH = 'config/sources.json';
 const MAX_PROJECT_MATCHES_PER_ARTICLE = 5;
 const MAX_PROJECT_TEXT_LENGTH = 240;
 const AGGREGATOR_HOSTS = new Set([
@@ -42,7 +41,7 @@ const EVENT_STOP_WORDS = new Set([
 ]);
 
 // 96 RSS feeds from Hacker News Popularity Contest 2025 (curated by Karpathy)
-const RSS_FEEDS: Array<{ name: string; xmlUrl: string; htmlUrl: string }> = [
+const RSS_FEEDS: FeedSource[] = [
   { name: "simonwillison.net", xmlUrl: "https://simonwillison.net/atom/everything/", htmlUrl: "https://simonwillison.net" },
   { name: "jeffgeerling.com", xmlUrl: "https://www.jeffgeerling.com/blog.xml", htmlUrl: "https://jeffgeerling.com" },
   { name: "seangoedecke.com", xmlUrl: "https://www.seangoedecke.com/rss.xml", htmlUrl: "https://seangoedecke.com" },
@@ -190,6 +189,17 @@ const CATEGORY_META: Record<CategoryId, { emoji: string; label: string }> = {
   'other':       { emoji: '📝', label: '其他' },
 };
 
+type SourceTier = 'first-party' | 'research' | 'community' | 'aggregator';
+type ProjectSelectionPreset = 'strict' | 'balanced' | 'broad';
+
+interface FeedSource {
+  name: string;
+  xmlUrl: string;
+  htmlUrl: string;
+  tier?: SourceTier;
+  tags?: string[];
+}
+
 interface Article {
   title: string;
   link: string;
@@ -197,6 +207,8 @@ interface Article {
   description: string;
   sourceName: string;
   sourceUrl: string;
+  sourceTier?: SourceTier;
+  sourceTags?: string[];
 }
 
 interface ScoredArticle extends Article {
@@ -218,12 +230,29 @@ interface ProjectConfig {
   id: string;
   name: string;
   goal: string;
+  requiredSignalGroups: string[][];
   requiredSignals: string[];
   supportingSignals: string[];
   negativeSignals: string[];
   keywords: string[];
   entities: string[];
   exclude: string[];
+  selection: ProjectSelection;
+  sourcePreferences: ProjectSourcePreferences;
+}
+
+interface ProjectSelection {
+  preset: ProjectSelectionPreset;
+  minMatchRelevance: number;
+  minSectionRelevance: number;
+  minArticleQuality: number;
+  minActionability: number;
+  maxItems: number;
+}
+
+interface ProjectSourcePreferences {
+  preferredTiers: SourceTier[];
+  preferredTags: string[];
 }
 
 interface ProjectMatch {
@@ -640,7 +669,7 @@ function parseRSSItems(xml: string): Array<{ title: string; link: string; pubDat
 // Feed Fetching
 // ============================================================================
 
-async function fetchFeed(feed: { name: string; xmlUrl: string; htmlUrl: string }): Promise<Article[]> {
+async function fetchFeed(feed: FeedSource): Promise<Article[]> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FEED_FETCH_TIMEOUT_MS);
@@ -669,6 +698,8 @@ async function fetchFeed(feed: { name: string; xmlUrl: string; htmlUrl: string }
       description: item.description,
       sourceName: feed.name,
       sourceUrl: feed.htmlUrl,
+      sourceTier: feed.tier,
+      sourceTags: feed.tags,
     }));
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -682,7 +713,7 @@ async function fetchFeed(feed: { name: string; xmlUrl: string; htmlUrl: string }
   }
 }
 
-async function fetchAllFeeds(feeds: typeof RSS_FEEDS): Promise<Article[]> {
+async function fetchAllFeeds(feeds: FeedSource[]): Promise<Article[]> {
   const allArticles: Article[] = [];
   let successCount = 0;
   let failCount = 0;
@@ -1057,13 +1088,101 @@ function normalizeStringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function normalizeSignalGroups(value: unknown): string[][] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(group => normalizeStringArray(group))
+    .filter(group => group.length > 0);
+}
+
+const PROJECT_SELECTION_PRESETS: Record<ProjectSelectionPreset, ProjectSelection> = {
+  strict: {
+    preset: 'strict',
+    minMatchRelevance: 7,
+    minSectionRelevance: 8,
+    minArticleQuality: 7,
+    minActionability: 6,
+    maxItems: 2,
+  },
+  balanced: {
+    preset: 'balanced',
+    minMatchRelevance: 6,
+    minSectionRelevance: 7,
+    minArticleQuality: 5,
+    minActionability: 1,
+    maxItems: 2,
+  },
+  broad: {
+    preset: 'broad',
+    minMatchRelevance: 5,
+    minSectionRelevance: 6,
+    minArticleQuality: 4,
+    minActionability: 1,
+    maxItems: 3,
+  },
+};
+
+const SOURCE_TIERS = new Set<SourceTier>(['first-party', 'research', 'community', 'aggregator']);
+
+function normalizeBoundedInteger(value: unknown, fallback: number, min: number, max: number): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(numeric)));
+}
+
+function normalizeProjectSelection(value: unknown): ProjectSelection {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const preset = typeof record.preset === 'string' && Object.hasOwn(PROJECT_SELECTION_PRESETS, record.preset)
+    ? record.preset as ProjectSelectionPreset
+    : 'balanced';
+  const defaults = PROJECT_SELECTION_PRESETS[preset];
+
+  return {
+    preset,
+    minMatchRelevance: normalizeBoundedInteger(record.minMatchRelevance, defaults.minMatchRelevance, 1, 10),
+    minSectionRelevance: normalizeBoundedInteger(record.minSectionRelevance, defaults.minSectionRelevance, 1, 10),
+    minArticleQuality: normalizeBoundedInteger(record.minArticleQuality, defaults.minArticleQuality, 1, 10),
+    minActionability: normalizeBoundedInteger(record.minActionability, defaults.minActionability, 1, 10),
+    maxItems: normalizeBoundedInteger(record.maxItems, defaults.maxItems, 1, 10),
+  };
+}
+
+function normalizeSourceTiers(value: unknown): SourceTier[] {
+  return normalizeStringArray(value)
+    .filter((tier): tier is SourceTier => SOURCE_TIERS.has(tier as SourceTier));
+}
+
+function normalizeProjectSourcePreferences(value: unknown): ProjectSourcePreferences {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
+    preferredTiers: normalizeSourceTiers(record.preferredTiers),
+    preferredTags: normalizeStringArray(record.preferredTags),
+  };
+}
+
+function normalizeSignalText(value: string): string {
+  return ` ${value.normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim()} `;
+}
+
+export function satisfiesRequiredSignalGroups(project: ProjectConfig, articleText: string): boolean {
+  if (project.requiredSignalGroups.length === 0) return true;
+
+  const normalizedArticle = normalizeSignalText(articleText);
+  return project.requiredSignalGroups.every(group =>
+    group.some(signal => {
+      const normalizedSignal = normalizeSignalText(signal).trim();
+      return normalizedSignal.length > 0 && normalizedArticle.includes(` ${normalizedSignal} `);
+    })
+  );
+}
+
 function clampScore(value: unknown): number {
   const numeric = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(numeric)) return 1;
   return Math.min(10, Math.max(1, Math.round(numeric)));
 }
 
-function validateProjectEntry(value: unknown, index: number): ProjectConfig | null {
+export function validateProjectEntry(value: unknown, index: number): ProjectConfig | null {
   if (!value || typeof value !== 'object') {
     console.warn(`[digest] Project config: skipping project at index ${index} (not an object)`);
     return null;
@@ -1084,13 +1203,33 @@ function validateProjectEntry(value: unknown, index: number): ProjectConfig | nu
     id,
     name,
     goal,
+    requiredSignalGroups: normalizeSignalGroups(record.requiredSignalGroups),
     requiredSignals: normalizeStringArray(record.requiredSignals),
     supportingSignals: normalizeStringArray(record.supportingSignals),
     negativeSignals: normalizeStringArray(record.negativeSignals),
     keywords,
     entities: normalizeStringArray(record.entities),
     exclude: normalizeStringArray(record.exclude),
+    selection: normalizeProjectSelection(record.selection),
+    sourcePreferences: normalizeProjectSourcePreferences(record.sourcePreferences),
   };
+}
+
+export function validateProjectsConfig(value: unknown): ProjectConfig[] {
+  if (!value || typeof value !== 'object' || !Array.isArray((value as { projects?: unknown }).projects)) return [];
+
+  const seen = new Set<string>();
+  return ((value as { projects: unknown[] }).projects)
+    .map((entry, index) => validateProjectEntry(entry, index))
+    .filter((project): project is ProjectConfig => {
+      if (!project) return false;
+      if (seen.has(project.id)) {
+        console.warn(`[digest] Project config: skipping duplicate project id ${project.id}`);
+        return false;
+      }
+      seen.add(project.id);
+      return true;
+    });
 }
 
 async function loadProjects(configPath = process.env.PROJECTS_CONFIG_PATH || DEFAULT_PROJECTS_CONFIG_PATH): Promise<ProjectConfig[]> {
@@ -1103,9 +1242,7 @@ async function loadProjects(configPath = process.env.PROJECTS_CONFIG_PATH || DEF
       return [];
     }
 
-    const projects = parsed.projects
-      .map((entry, index) => validateProjectEntry(entry, index))
-      .filter((project): project is ProjectConfig => project !== null);
+    const projects = validateProjectsConfig(parsed);
 
     console.log(`[digest] Loaded ${projects.length} projects from ${configPath}`);
     if (projects.length === 0) {
@@ -1119,7 +1256,70 @@ async function loadProjects(configPath = process.env.PROJECTS_CONFIG_PATH || DEF
   }
 }
 
-function validateProjectMatches(rawMatches: unknown, knownProjectIds: Set<string>): ProjectMatch[] {
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+export function validateSourcesConfig(value: unknown): FeedSource[] {
+  if (!value || typeof value !== 'object' || !Array.isArray((value as { sources?: unknown }).sources)) return [];
+
+  const sources: FeedSource[] = [];
+  const seenUrls = new Set<string>();
+  for (const [index, raw] of ((value as { sources: unknown[] }).sources).entries()) {
+    if (!raw || typeof raw !== 'object') {
+      console.warn(`[digest] Source config: skipping source at index ${index} (not an object)`);
+      continue;
+    }
+    const record = raw as Record<string, unknown>;
+    if (record.enabled === false) continue;
+
+    const name = truncateText(record.name, 120);
+    const xmlUrl = truncateText(record.xmlUrl, 500);
+    const htmlUrl = truncateText(record.htmlUrl, 500);
+    const tier = typeof record.tier === 'string' && SOURCE_TIERS.has(record.tier as SourceTier)
+      ? record.tier as SourceTier
+      : 'community';
+    if (!name || !isHttpUrl(xmlUrl) || !isHttpUrl(htmlUrl) || seenUrls.has(xmlUrl)) {
+      console.warn(`[digest] Source config: skipping source at index ${index} (invalid name/URL or duplicate feed)`);
+      continue;
+    }
+
+    seenUrls.add(xmlUrl);
+    sources.push({ name, xmlUrl, htmlUrl, tier, tags: normalizeStringArray(record.tags) });
+  }
+  return sources;
+}
+
+export async function loadConfiguredSources(configPath = process.env.SOURCES_CONFIG_PATH || DEFAULT_SOURCES_CONFIG_PATH): Promise<FeedSource[]> {
+  try {
+    const text = await readFile(configPath, 'utf8');
+    const parsed = JSON.parse(text) as unknown;
+    const sources = validateSourcesConfig(parsed);
+    console.log(`[digest] Loaded ${sources.length} additional sources from ${configPath}`);
+    return sources;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(`[digest] Source config: could not load ${configPath} (${msg}); using built-in sources only`);
+    return [];
+  }
+}
+
+function mergeFeedSources(...groups: FeedSource[][]): FeedSource[] {
+  const merged = new Map<string, FeedSource>();
+  for (const source of groups.flat()) merged.set(source.xmlUrl, source);
+  return [...merged.values()];
+}
+
+function validateProjectMatches(
+  rawMatches: unknown,
+  projectsById: Map<string, ProjectConfig>,
+  articleText: string
+): ProjectMatch[] {
   if (!Array.isArray(rawMatches)) return [];
 
   const matches: ProjectMatch[] = [];
@@ -1129,10 +1329,12 @@ function validateProjectMatches(rawMatches: unknown, knownProjectIds: Set<string
     if (!raw || typeof raw !== 'object') continue;
     const record = raw as Record<string, unknown>;
     const projectId = typeof record.projectId === 'string' ? record.projectId.trim() : '';
-    if (!projectId || !knownProjectIds.has(projectId) || seen.has(projectId)) continue;
+    const project = projectsById.get(projectId);
+    if (!projectId || !project || seen.has(projectId)) continue;
+    if (!satisfiesRequiredSignalGroups(project, articleText)) continue;
 
     const projectRelevance = clampScore(record.projectRelevance);
-    if (projectRelevance < PROJECT_MATCH_RELEVANCE_THRESHOLD) continue;
+    if (projectRelevance < project.selection.minMatchRelevance) continue;
 
     matches.push({
       projectId,
@@ -1158,7 +1360,8 @@ function validateArticleScore(
   allowedIndices: Set<number>,
   batchIndices: number[],
   validCategories: Set<string>,
-  knownProjectIds: Set<string>
+  projectsById: Map<string, ProjectConfig>,
+  articleTextByIndex: Map<number, string>
 ): { index: number; score: ArticleScore } | null {
   if (!rawResult || typeof rawResult !== 'object') return null;
 
@@ -1189,7 +1392,7 @@ function validateArticleScore(
       timeliness: clampScore(record.timeliness),
       category,
       keywords: normalizeStringArray(record.keywords).slice(0, 4),
-      projectMatches: validateProjectMatches(record.projectMatches, knownProjectIds),
+      projectMatches: validateProjectMatches(record.projectMatches, projectsById, articleTextByIndex.get(index) || ''),
     },
   };
 }
@@ -1216,25 +1419,30 @@ function buildScoringPrompt(
 
 ${projects.map(project => `### ${project.id}: ${project.name}
 - 目标: ${project.goal}
-- 核心必要信号: ${project.requiredSignals.length > 0 ? project.requiredSignals.join(', ') : '无额外限制'}
+- 必须同时满足的信号组: ${project.requiredSignalGroups.length > 0 ? project.requiredSignalGroups.map((group, index) => `组${index + 1}(${group.join(', ')})`).join('；') : '无'}
+- 单组核心必要信号: ${project.requiredSignalGroups.length === 0 && project.requiredSignals.length > 0 ? project.requiredSignals.join(', ') : '无额外限制'}
 - 辅助信号: ${project.supportingSignals.length > 0 ? project.supportingSignals.join(', ') : '无'}
 - 负面信号: ${project.negativeSignals.length > 0 ? project.negativeSignals.join(', ') : '无'}
 - 关键词: ${project.keywords.join(', ')}
 - 相关实体: ${project.entities.length > 0 ? project.entities.join(', ') : '无'}
-- 排除主题: ${project.exclude.length > 0 ? project.exclude.join(', ') : '无'}`).join('\n\n')}
+- 排除主题: ${project.exclude.length > 0 ? project.exclude.join(', ') : '无'}
+- 匹配最低分: ${project.selection.minMatchRelevance}/10
+- 筛选严格度: ${project.selection.preset}`).join('\n\n')}
 
 项目匹配规则：
 1. 一篇文章可以匹配 0 个、1 个或多个项目。
-2. 只返回 projectRelevance >= 6 的项目匹配。
+2. 只返回达到对应项目“匹配最低分”的项目匹配。
 3. projectId 必须来自上方项目 ID，不能编造。
 4. 关键词重合本身不足以给高分，必须结合文章主题判断。
-5. 配置了核心必要信号时，文章标题或描述必须明确支持至少一个核心必要信号；辅助信号或实体名称不能单独构成匹配。
-6. 出现负面信号或排除主题，且没有明确核心必要信号时，不得返回项目匹配。
-7. 纯营销、融资或空泛观点内容不应获得高项目分。
-8. 不要编造标题或描述没有支持的信息。
-9. whyRelevant 必须用中文指出文章中的具体证据，并说明它为何与项目相关。
-10. recommendedAction 必须用中文给出具体下一步动作。
-11. 具体动作可以包括：加入评测候选池、与当前架构对比、阅读技术文档、复现实验、增加安全检查、跟踪上游项目等。
+5. 配置了“必须同时满足的信号组”时，文章标题或描述必须对每一组都明确命中至少一个信号；辅助信号、关键词或实体不能代替任何缺失的组。
+6. 未配置分组但配置了单组核心必要信号时，文章标题或描述必须明确支持至少一个核心必要信号。
+7. 仅讨论 Agent 架构、能力或性能，却没有明确安全、隐私、授权、隔离或合规证据的文章，不得匹配 Agent 安全项目。
+8. 出现负面信号或排除主题，且没有满足必要信号要求时，不得返回项目匹配。
+9. 纯营销、融资或空泛观点内容不应获得高项目分。
+10. 不要编造标题或描述没有支持的信息。
+11. whyRelevant 必须用中文指出满足各必要信号组的具体证据，并说明它为何与项目相关。
+12. recommendedAction 必须用中文给出具体下一步动作。
+13. 具体动作可以包括：加入评测候选池、与当前架构对比、阅读技术文档、复现实验、增加安全检查、跟踪上游项目等。
 `;
 
   const projectJsonExample = projects.length === 0
@@ -1306,7 +1514,7 @@ ${articlesList}
 }`;
 }
 
-async function scoreArticlesWithAI(
+export async function scoreArticlesWithAI(
   articles: Article[],
   aiClient: AIClient,
   projects: ProjectConfig[]
@@ -1319,46 +1527,79 @@ async function scoreArticlesWithAI(
     description: article.description,
     sourceName: article.sourceName,
   }));
+  const articleTextByIndex = new Map(indexed.map(item => [item.index, `${item.title} ${item.description}`]));
   
   const batches: typeof indexed[] = [];
-  for (let i = 0; i < indexed.length; i += GEMINI_BATCH_SIZE) {
-    batches.push(indexed.slice(i, i + GEMINI_BATCH_SIZE));
+  for (let i = 0; i < indexed.length; i += SCORING_BATCH_SIZE) {
+    batches.push(indexed.slice(i, i + SCORING_BATCH_SIZE));
   }
   
   console.log(`[digest] AI scoring: ${articles.length} articles in ${batches.length} batches`);
   
   const validCategories = new Set<string>(['ai-ml', 'security', 'engineering', 'tools', 'opinion', 'other']);
-  const knownProjectIds = new Set(projects.map(project => project.id));
+  const projectsById = new Map(projects.map(project => [project.id, project]));
   
   for (let i = 0; i < batches.length; i += MAX_CONCURRENT_GEMINI) {
     const batchGroup = batches.slice(i, i + MAX_CONCURRENT_GEMINI);
     const promises = batchGroup.map(async (batch) => {
-      try {
-        const prompt = buildScoringPrompt(batch, projects);
-        const responseText = await aiClient.call(prompt, 'scoring');
-        const parsed = parseJsonResponse<GeminiScoringResult>(responseText);
+      const prompt = buildScoringPrompt(batch, projects);
+      const batchIndices = batch.map(item => item.index);
+      const allowedIndices = new Set(batchIndices);
+      let bestScores = new Map<number, ArticleScore>();
+      let lastError: unknown;
 
-        if (parsed && Array.isArray(parsed.results)) {
-          const batchIndices = batch.map(item => item.index);
-          const allowedIndices = new Set(batchIndices);
+      for (let attempt = 1; attempt <= SCORING_MAX_ATTEMPTS; attempt++) {
+        try {
+          const responseText = await aiClient.call(prompt, 'scoring');
+          const parsed = parseJsonResponse<GeminiScoringResult>(responseText);
+          if (!parsed || !Array.isArray(parsed.results)) {
+            throw new Error('Scoring response does not contain a results array');
+          }
+
+          const attemptScores = new Map<number, ArticleScore>();
           let skippedResults = 0;
           for (const rawResult of parsed.results) {
-            const result = validateArticleScore(rawResult, allowedIndices, batchIndices, validCategories, knownProjectIds);
+            const result = validateArticleScore(
+              rawResult,
+              allowedIndices,
+              batchIndices,
+              validCategories,
+              projectsById,
+              articleTextByIndex
+            );
             if (!result) {
               skippedResults++;
               continue;
             }
-            allScores.set(result.index, result.score);
+            attemptScores.set(result.index, result.score);
           }
+
+          if (attemptScores.size > bestScores.size) bestScores = attemptScores;
+          if (attemptScores.size !== batch.length) {
+            throw new Error(`Scoring response returned ${attemptScores.size}/${batch.length} valid result(s)`);
+          }
+
+          for (const [index, score] of attemptScores) allScores.set(index, score);
           if (skippedResults > 0) {
             console.warn(`[digest] Scoring batch: skipped ${skippedResults} invalid response item(s)`);
           }
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt < SCORING_MAX_ATTEMPTS) {
+            console.warn(`[digest] Scoring batch attempt ${attempt}/${SCORING_MAX_ATTEMPTS} failed (${error instanceof Error ? error.message : String(error)}); retrying once`);
+          }
         }
-      } catch (error) {
-        console.warn(`[digest] Scoring batch failed: ${error instanceof Error ? error.message : String(error)}`);
-        for (const item of batch) {
-          allScores.set(item.index, { relevance: 5, quality: 5, timeliness: 5, category: 'other', keywords: [], projectMatches: [] });
-        }
+      }
+
+      for (const [index, score] of bestScores) allScores.set(index, score);
+      const missingItems = batch.filter(item => !bestScores.has(item.index));
+      console.warn(
+        `[digest] Scoring batch failed after ${SCORING_MAX_ATTEMPTS} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}; `
+        + `using ${bestScores.size} recovered result(s) and defaults for ${missingItems.length}`
+      );
+      for (const item of missingItems) {
+        allScores.set(item.index, { relevance: 5, quality: 5, timeliness: 5, category: 'other', keywords: [], projectMatches: [] });
       }
     });
     
@@ -1785,13 +2026,19 @@ function getDomainIdentity(hostname: string): string {
 }
 
 export function getSourceAuthorityScore(
-  article: { title: string; description: string; link: string; sourceUrl: string; breakdown?: ArticleScore },
+  article: { title: string; description: string; link: string; sourceUrl: string; sourceTier?: SourceTier; breakdown?: ArticleScore },
   eventContext = ''
 ): number {
   const linkHostname = getHostname(article.link);
   if (!linkHostname || AGGREGATOR_HOSTS.has(linkHostname)) return 0;
 
-  let score = 2;
+  let score = article.sourceTier === 'first-party'
+    ? 5
+    : article.sourceTier === 'research'
+      ? 4
+      : article.sourceTier === 'aggregator'
+        ? 1
+        : 2;
   const sourceHostname = getHostname(article.sourceUrl);
   if (sourceHostname && (sourceHostname === linkHostname || linkHostname.endsWith(`.${sourceHostname}`))) {
     score += 1;
@@ -1808,10 +2055,21 @@ export function getSourceAuthorityScore(
   return score;
 }
 
+function getProjectSourcePreferenceScore(
+  article: { sourceTier?: SourceTier; sourceTags?: string[] },
+  project: ProjectConfig
+): number {
+  let score = article.sourceTier && project.sourcePreferences.preferredTiers.includes(article.sourceTier) ? 2 : 0;
+  const preferredTags = new Set(project.sourcePreferences.preferredTags.map(tag => tag.toLowerCase()));
+  score += (article.sourceTags || []).filter(tag => preferredTags.has(tag.toLowerCase())).length;
+  return score;
+}
+
 function compareProjectEventCandidates<
-  T extends { title: string; description: string; link: string; sourceUrl: string; breakdown: ArticleScore; genericScore: number; projectAwareScore: number; pubDate: Date }
->(a: ProjectEventCandidate<T>, b: ProjectEventCandidate<T>, eventContext = ''): number {
-  return getSourceAuthorityScore(b.article, eventContext) - getSourceAuthorityScore(a.article, eventContext)
+  T extends { title: string; description: string; link: string; sourceUrl: string; sourceTier?: SourceTier; sourceTags?: string[]; breakdown: ArticleScore; genericScore: number; projectAwareScore: number; pubDate: Date }
+>(a: ProjectEventCandidate<T>, b: ProjectEventCandidate<T>, project: ProjectConfig, eventContext = ''): number {
+  return getProjectSourcePreferenceScore(b.article, project) - getProjectSourcePreferenceScore(a.article, project)
+    || getSourceAuthorityScore(b.article, eventContext) - getSourceAuthorityScore(a.article, eventContext)
     || b.article.breakdown.quality - a.article.breakdown.quality
     || b.match.projectRelevance - a.match.projectRelevance
     || b.match.actionability - a.match.actionability
@@ -1821,7 +2079,7 @@ function compareProjectEventCandidates<
 }
 
 export function selectProjectIntelligenceCandidates<
-  T extends { title: string; description: string; link: string; sourceUrl: string; breakdown: ArticleScore; genericScore: number; projectAwareScore: number; pubDate: Date }
+  T extends { title: string; description: string; link: string; sourceUrl: string; sourceTier?: SourceTier; sourceTags?: string[]; breakdown: ArticleScore; genericScore: number; projectAwareScore: number; pubDate: Date }
 >(articles: T[], projects: ProjectConfig[]): Array<ProjectIntelligenceCandidate<T>> {
   const selectedByArticle = new Map<T, ProjectMatch[]>();
 
@@ -1831,10 +2089,11 @@ export function selectProjectIntelligenceCandidates<
       return match ? [{ article, match }] : [];
     });
     const relevanceQualified = modelMatches.filter(({ match }) =>
-      match.projectRelevance >= PROJECT_INTELLIGENCE_RELEVANCE_THRESHOLD
+      match.projectRelevance >= project.selection.minSectionRelevance
     );
-    const eligible = relevanceQualified.filter(({ article }) =>
-      article.breakdown.quality >= PROJECT_INTELLIGENCE_QUALITY_THRESHOLD
+    const eligible = relevanceQualified.filter(({ article, match }) =>
+      article.breakdown.quality >= project.selection.minArticleQuality
+      && match.actionability >= project.selection.minActionability
     );
     const eventClusters: Array<Array<ProjectEventCandidate<T>>> = [];
     for (const candidate of eligible) {
@@ -1849,21 +2108,22 @@ export function selectProjectIntelligenceCandidates<
         const eventContext = cluster
           .map(({ article }) => `${article.title} ${article.description} ${article.breakdown.keywords.join(' ')}`)
           .join(' ');
-        return [...cluster].sort((a, b) => compareProjectEventCandidates(a, b, eventContext))[0]!;
+        return [...cluster].sort((a, b) => compareProjectEventCandidates(a, b, project, eventContext))[0]!;
       })
       .sort((a, b) =>
         b.match.projectRelevance - a.match.projectRelevance
         || b.match.actionability - a.match.actionability
+        || getProjectSourcePreferenceScore(b.article, project) - getProjectSourcePreferenceScore(a.article, project)
         || b.article.projectAwareScore - a.article.projectAwareScore
         || getSourceAuthorityScore(b.article) - getSourceAuthorityScore(a.article)
         || b.article.genericScore - a.article.genericScore
         || b.article.pubDate.getTime() - a.article.pubDate.getTime()
       );
     const selected = eventRepresentatives
-      .slice(0, MAX_PROJECT_INTELLIGENCE_PER_PROJECT);
+      .slice(0, project.selection.maxItems);
 
     console.log(
-      `[digest] Project ${project.id}: matched=${modelMatches.length}, relevance>=${PROJECT_INTELLIGENCE_RELEVANCE_THRESHOLD}=${relevanceQualified.length}, quality>=${PROJECT_INTELLIGENCE_QUALITY_THRESHOLD}=${eligible.length}, uniqueEvents=${eventClusters.length}, duplicates=${eligible.length - eventClusters.length}, selected=${selected.length}`
+      `[digest] Project ${project.id} (${project.selection.preset}): matched=${modelMatches.length}, relevance>=${project.selection.minSectionRelevance}=${relevanceQualified.length}, quality>=${project.selection.minArticleQuality} and actionability>=${project.selection.minActionability}=${eligible.length}, uniqueEvents=${eventClusters.length}, duplicates=${eligible.length - eventClusters.length}, selected=${selected.length}`
     );
 
     for (const { article, match } of selected) {
@@ -2074,7 +2334,7 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
 // ============================================================================
 
 function printUsage(): never {
-  console.log(`AI Daily Digest - AI-powered RSS digest from 90 top tech blogs
+  console.log(`AI Daily Digest - AI-powered digest from 110+ tech and research sources
 
 Usage:
   bun scripts/digest.ts [options]
@@ -2097,6 +2357,7 @@ Environment:
   RSSHUB_BASE_URL  RSSHub instance URL for X/Twitter feeds (default: https://rsshub.app)
   X_ACCOUNTS       Comma-separated X/Twitter accounts to follow (e.g. karpathy,sama,ylecun)
   PROJECTS_CONFIG_PATH Optional project profile JSON path (default: config/projects.json)
+  SOURCES_CONFIG_PATH Optional additional RSS/Atom source JSON path (default: config/sources.json)
 
 Examples:
   bun scripts/digest.ts --hours 24 --top-n 10 --lang zh
@@ -2179,10 +2440,13 @@ async function main(): Promise<void> {
   }
   console.log('');
 
-  const projects = await loadProjects();
+  const [projects, configuredSources] = await Promise.all([
+    loadProjects(),
+    loadConfiguredSources(),
+  ]);
 
   const xFeeds = buildXFeeds();
-  const allFeeds = [...RSS_FEEDS, ...xFeeds];
+  const allFeeds = mergeFeedSources(RSS_FEEDS, configuredSources, xFeeds);
   if (xFeeds.length > 0) {
     console.log(`[digest] X/Twitter accounts: ${xFeeds.map(f => f.name).join(', ')} (via ${RSSHUB_BASE_URL})`);
   }
@@ -2267,6 +2531,8 @@ async function main(): Promise<void> {
       description: article.description,
       sourceName: article.sourceName,
       sourceUrl: article.sourceUrl,
+      sourceTier: article.sourceTier,
+      sourceTags: article.sourceTags,
       score: article.projectAwareScore,
       scoreBreakdown: {
         relevance: article.breakdown.relevance,
