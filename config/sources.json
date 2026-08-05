@@ -1,0 +1,67 @@
+{
+  "sources": [
+    {
+      "name": "arXiv Multiagent Systems",
+      "xmlUrl": "https://rss.arxiv.org/rss/cs.MA",
+      "htmlUrl": "https://arxiv.org/list/cs.MA/recent",
+      "tier": "research",
+      "tags": ["multi-agent", "research"]
+    },
+    {
+      "name": "OpenAI News",
+      "xmlUrl": "https://openai.com/news/rss.xml",
+      "htmlUrl": "https://openai.com/news/",
+      "tier": "first-party",
+      "tags": ["ai-lab", "agent-framework", "agent-security", "speech", "multimodal"]
+    },
+    {
+      "name": "Google Research",
+      "xmlUrl": "https://research.google/blog/rss/",
+      "htmlUrl": "https://research.google/blog/",
+      "tier": "research",
+      "tags": ["ai-research", "multi-agent", "speech", "ocr", "multimodal"]
+    },
+    {
+      "name": "Microsoft Research",
+      "xmlUrl": "https://www.microsoft.com/en-us/research/feed/",
+      "htmlUrl": "https://www.microsoft.com/en-us/research/blog/",
+      "tier": "research",
+      "tags": ["ai-research", "multi-agent", "agent-framework", "speech"]
+    },
+    {
+      "name": "AWS Machine Learning Blog",
+      "xmlUrl": "https://aws.amazon.com/blogs/machine-learning/feed/",
+      "htmlUrl": "https://aws.amazon.com/blogs/machine-learning/",
+      "tier": "first-party",
+      "tags": ["machine-learning", "agent-framework", "speech", "ocr", "document-ai"]
+    },
+    {
+      "name": "Microsoft Agent Framework Releases",
+      "xmlUrl": "https://github.com/microsoft/agent-framework/releases.atom",
+      "htmlUrl": "https://github.com/microsoft/agent-framework/releases",
+      "tier": "first-party",
+      "tags": ["multi-agent", "agent-framework"]
+    },
+    {
+      "name": "LangGraph Releases",
+      "xmlUrl": "https://github.com/langchain-ai/langgraph/releases.atom",
+      "htmlUrl": "https://github.com/langchain-ai/langgraph/releases",
+      "tier": "first-party",
+      "tags": ["multi-agent", "agent-framework"]
+    },
+    {
+      "name": "A2A Protocol Releases",
+      "xmlUrl": "https://github.com/a2aproject/A2A/releases.atom",
+      "htmlUrl": "https://github.com/a2aproject/A2A/releases",
+      "tier": "first-party",
+      "tags": ["multi-agent", "agent-protocol"]
+    },
+    {
+      "name": "OpenAI Agents SDK JS Releases",
+      "xmlUrl": "https://github.com/openai/openai-agents-js/releases.atom",
+      "htmlUrl": "https://github.com/openai/openai-agents-js/releases",
+      "tier": "first-party",
+      "tags": ["multi-agent", "agent-framework", "speech"]
+    }
+  ]
+}
