@@ -1,5 +1,5 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
+import { basename, dirname } from 'node:path';
 import process from 'node:process';
 
 // ============================================================================
@@ -16,11 +16,12 @@ const SCORING_BATCH_SIZE = 8;
 const SCORING_MAX_ATTEMPTS = 2;
 const MAX_CONCURRENT_GEMINI = 2;
 const DEFAULT_AI_REQUEST_TIMEOUT_MS = 180_000;
-const DEFAULT_DEEPSEEK_THINKING_TASKS = 'scoring,highlights';
+const DEFAULT_DEEPSEEK_THINKING_TASKS = 'project-scoring,highlights';
 const DEFAULT_PROJECTS_CONFIG_PATH = 'config/projects.json';
 const DEFAULT_SOURCES_CONFIG_PATH = 'config/sources.json';
 const MAX_PROJECT_MATCHES_PER_ARTICLE = 5;
 const MAX_PROJECT_TEXT_LENGTH = 240;
+const DIGEST_COOLDOWN_HOURS = 48;
 const AGGREGATOR_HOSTS = new Set([
   'news.ycombinator.com',
   'reddit.com',
@@ -198,6 +199,7 @@ interface FeedSource {
   htmlUrl: string;
   tier?: SourceTier;
   tags?: string[];
+  maxTopItems?: number;
 }
 
 interface Article {
@@ -209,6 +211,7 @@ interface Article {
   sourceUrl: string;
   sourceTier?: SourceTier;
   sourceTags?: string[];
+  sourceMaxTopItems?: number;
 }
 
 interface ScoredArticle extends Article {
@@ -285,7 +288,7 @@ interface GeminiSummaryResult {
   }>;
 }
 
-type AITask = 'scoring' | 'summary' | 'highlights' | 'design';
+type AITask = 'scoring' | 'project-scoring' | 'summary' | 'highlights' | 'design';
 type AIProvider = 'gemini' | 'openai';
 
 interface AIClient {
@@ -700,6 +703,7 @@ async function fetchFeed(feed: FeedSource): Promise<Article[]> {
       sourceUrl: feed.htmlUrl,
       sourceTier: feed.tier,
       sourceTags: feed.tags,
+      sourceMaxTopItems: feed.maxTopItems,
     }));
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -862,6 +866,37 @@ async function callGemini(
   throw new Error('Gemini API: max retries exceeded (429 rate limit)');
 }
 
+export function buildOpenAIRequestBody(
+  prompt: string,
+  model: string,
+  task: AITask,
+  thinkingTasks: ReadonlySet<AITask>,
+  isDeepSeekV4: boolean
+): Record<string, unknown> {
+  const thinkingEnabled = isDeepSeekV4 && task !== 'scoring' && thinkingTasks.has(task);
+  const requestBody: Record<string, unknown> = {
+    model,
+    messages: [{ role: 'user', content: prompt }],
+  };
+
+  if (isDeepSeekV4) {
+    if (task === 'scoring' || task === 'project-scoring' || task === 'summary' || task === 'design') {
+      requestBody.response_format = { type: 'json_object' };
+    }
+    requestBody.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' };
+    if (thinkingEnabled) {
+      requestBody.reasoning_effort = 'high';
+    } else {
+      requestBody.temperature = 0.3;
+      requestBody.top_p = 0.8;
+    }
+  } else {
+    requestBody.temperature = 0.3;
+    requestBody.top_p = 0.8;
+  }
+  return requestBody;
+}
+
 async function callOpenAICompatible(
   prompt: string,
   apiKey: string,
@@ -874,24 +909,7 @@ async function callOpenAICompatible(
   const normalizedBase = apiBase.replace(/\/+$/, '');
   const isDeepSeekV4 = normalizedBase.toLowerCase().includes('api.deepseek.com')
     && model.toLowerCase().startsWith('deepseek-v4-');
-  const thinkingEnabled = isDeepSeekV4 && thinkingTasks.has(task);
-  const requestBody: Record<string, unknown> = {
-    model,
-    messages: [{ role: 'user', content: prompt }],
-  };
-
-  if (isDeepSeekV4) {
-    requestBody.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' };
-    if (thinkingEnabled) {
-      requestBody.reasoning_effort = 'high';
-    } else {
-      requestBody.temperature = 0.3;
-      requestBody.top_p = 0.8;
-    }
-  } else {
-    requestBody.temperature = 0.3;
-    requestBody.top_p = 0.8;
-  }
+  const requestBody = buildOpenAIRequestBody(prompt, model, task, thinkingTasks, isDeepSeekV4);
 
   const response = await fetchTextWithTimeout(`${normalizedBase}/chat/completions`, {
     method: 'POST',
@@ -950,7 +968,7 @@ function inferOpenAIModel(apiBase: string): string {
 }
 
 function parseDeepSeekThinkingTasks(value: string | undefined): Set<AITask> {
-  const validTasks = new Set<AITask>(['scoring', 'summary', 'highlights', 'design']);
+  const validTasks = new Set<AITask>(['project-scoring', 'summary', 'highlights', 'design']);
   const configured = (value?.trim().toLowerCase() || DEFAULT_DEEPSEEK_THINKING_TASKS);
 
   if (configured === 'all') return new Set(validTasks);
@@ -958,6 +976,10 @@ function parseDeepSeekThinkingTasks(value: string | undefined): Set<AITask> {
 
   const tasks = new Set<AITask>();
   for (const name of configured.split(',').map(item => item.trim()).filter(Boolean)) {
+    if (name === 'scoring') {
+      tasks.add('project-scoring');
+      continue;
+    }
     if (validTasks.has(name as AITask)) {
       tasks.add(name as AITask);
     } else {
@@ -1290,7 +1312,13 @@ export function validateSourcesConfig(value: unknown): FeedSource[] {
     }
 
     seenUrls.add(xmlUrl);
-    sources.push({ name, xmlUrl, htmlUrl, tier, tags: normalizeStringArray(record.tags) });
+    const maxTopItems = typeof record.maxTopItems === 'number'
+      && Number.isInteger(record.maxTopItems)
+      && record.maxTopItems >= 1
+      && record.maxTopItems <= 100
+      ? record.maxTopItems
+      : undefined;
+    sources.push({ name, xmlUrl, htmlUrl, tier, tags: normalizeStringArray(record.tags), maxTopItems });
   }
   return sources;
 }
@@ -1514,27 +1542,29 @@ ${articlesList}
 }`;
 }
 
-export async function scoreArticlesWithAI(
-  articles: Article[],
+type IndexedScoringArticle = {
+  index: number;
+  title: string;
+  description: string;
+  sourceName: string;
+};
+
+async function scoreArticlePass(
+  indexed: IndexedScoringArticle[],
+  articleTextByIndex: Map<number, string>,
   aiClient: AIClient,
-  projects: ProjectConfig[]
+  projects: ProjectConfig[],
+  task: 'scoring' | 'project-scoring',
+  label: string
 ): Promise<Map<number, ArticleScore>> {
   const allScores = new Map<number, ArticleScore>();
-  
-  const indexed = articles.map((article, index) => ({
-    index,
-    title: article.title,
-    description: article.description,
-    sourceName: article.sourceName,
-  }));
-  const articleTextByIndex = new Map(indexed.map(item => [item.index, `${item.title} ${item.description}`]));
-  
+
   const batches: typeof indexed[] = [];
   for (let i = 0; i < indexed.length; i += SCORING_BATCH_SIZE) {
     batches.push(indexed.slice(i, i + SCORING_BATCH_SIZE));
   }
   
-  console.log(`[digest] AI scoring: ${articles.length} articles in ${batches.length} batches`);
+  console.log(`[digest] ${label}: ${indexed.length} articles in ${batches.length} batches`);
   
   const validCategories = new Set<string>(['ai-ml', 'security', 'engineering', 'tools', 'opinion', 'other']);
   const projectsById = new Map(projects.map(project => [project.id, project]));
@@ -1550,7 +1580,7 @@ export async function scoreArticlesWithAI(
 
       for (let attempt = 1; attempt <= SCORING_MAX_ATTEMPTS; attempt++) {
         try {
-          const responseText = await aiClient.call(prompt, 'scoring');
+          const responseText = await aiClient.call(prompt, task);
           const parsed = parseJsonResponse<GeminiScoringResult>(responseText);
           if (!parsed || !Array.isArray(parsed.results)) {
             throw new Error('Scoring response does not contain a results array');
@@ -1587,7 +1617,7 @@ export async function scoreArticlesWithAI(
         } catch (error) {
           lastError = error;
           if (attempt < SCORING_MAX_ATTEMPTS) {
-            console.warn(`[digest] Scoring batch attempt ${attempt}/${SCORING_MAX_ATTEMPTS} failed (${error instanceof Error ? error.message : String(error)}); retrying once`);
+            console.warn(`[digest] ${label} batch attempt ${attempt}/${SCORING_MAX_ATTEMPTS} failed (${error instanceof Error ? error.message : String(error)}); retrying once`);
           }
         }
       }
@@ -1595,7 +1625,7 @@ export async function scoreArticlesWithAI(
       for (const [index, score] of bestScores) allScores.set(index, score);
       const missingItems = batch.filter(item => !bestScores.has(item.index));
       console.warn(
-        `[digest] Scoring batch failed after ${SCORING_MAX_ATTEMPTS} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}; `
+        `[digest] ${label} batch failed after ${SCORING_MAX_ATTEMPTS} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}; `
         + `using ${bestScores.size} recovered result(s) and defaults for ${missingItems.length}`
       );
       for (const item of missingItems) {
@@ -1604,10 +1634,67 @@ export async function scoreArticlesWithAI(
     });
     
     await Promise.all(promises);
-    console.log(`[digest] Scoring progress: ${Math.min(i + MAX_CONCURRENT_GEMINI, batches.length)}/${batches.length} batches`);
+    console.log(`[digest] ${label} progress: ${Math.min(i + MAX_CONCURRENT_GEMINI, batches.length)}/${batches.length} batches`);
   }
   
   return allScores;
+}
+
+function containsConfiguredSignal(articleText: string, signal: string): boolean {
+  const normalizedSignal = normalizeSignalText(signal).trim();
+  return normalizedSignal.length > 0 && normalizeSignalText(articleText).includes(` ${normalizedSignal} `);
+}
+
+function articleMightMatchProject(article: Article, project: ProjectConfig): boolean {
+  const articleText = `${article.sourceName} ${article.title} ${article.description}`;
+  const primarySignals = project.requiredSignalGroups[0]?.length
+    ? project.requiredSignalGroups[0]
+    : project.requiredSignals;
+  const configuredSignals = [...primarySignals, ...project.keywords, ...project.entities];
+  return configuredSignals.some(signal => containsConfiguredSignal(articleText, signal));
+}
+
+export async function scoreArticlesWithAI(
+  articles: Article[],
+  aiClient: AIClient,
+  projects: ProjectConfig[]
+): Promise<Map<number, ArticleScore>> {
+  const indexed = articles.map((article, index) => ({
+    index,
+    title: article.title,
+    description: article.description,
+    sourceName: article.sourceName,
+  }));
+  const articleTextByIndex = new Map(indexed.map(item => [item.index, `${item.title} ${item.description}`]));
+  const genericScores = await scoreArticlePass(
+    indexed,
+    articleTextByIndex,
+    aiClient,
+    [],
+    'scoring',
+    'Generic AI scoring'
+  );
+  if (projects.length === 0) return genericScores;
+
+  const projectCandidates = indexed.filter(item =>
+    projects.some(project => articleMightMatchProject(articles[item.index]!, project))
+  );
+  console.log(`[digest] Project scoring candidates: ${projectCandidates.length}/${articles.length}`);
+  if (projectCandidates.length === 0) return genericScores;
+
+  const projectScores = await scoreArticlePass(
+    projectCandidates,
+    articleTextByIndex,
+    aiClient,
+    projects,
+    'project-scoring',
+    'Project AI scoring'
+  );
+  for (const [index, projectScore] of projectScores) {
+    const genericScore = genericScores.get(index);
+    if (genericScore) genericScore.projectMatches = projectScore.projectMatches;
+  }
+  return genericScores;
 }
 
 // ============================================================================
@@ -1929,27 +2016,178 @@ function compareProjectRank(
     || b.pubDate.getTime() - a.pubDate.getTime();
 }
 
-function rankArticles<T extends { breakdown: ArticleScore; genericScore: number; projectAwareScore: number; pubDate: Date }>(
+interface DigestHistoryEntry {
+  title: string;
+  link: string;
+}
+
+type RankableArticle = {
+  title: string;
+  description: string;
+  link: string;
+  sourceName: string;
+  sourceUrl: string;
+  sourceTier?: SourceTier;
+  sourceMaxTopItems?: number;
+  breakdown: ArticleScore;
+  genericScore: number;
+  projectAwareScore: number;
+  pubDate: Date;
+};
+
+function compareEventRepresentatives<T extends RankableArticle>(a: T, b: T): number {
+  return getSourceAuthorityScore(b) - getSourceAuthorityScore(a)
+    || b.breakdown.quality - a.breakdown.quality
+    || b.projectAwareScore - a.projectAwareScore
+    || b.genericScore - a.genericScore
+    || b.pubDate.getTime() - a.pubDate.getTime();
+}
+
+export function isSameDigestEvent<T extends RankableArticle>(a: T, b: T): boolean {
+  if (normalizeArticleUrl(a.link) === normalizeArticleUrl(b.link)) return true;
+
+  const titleA = tokenizeEventText(a.title);
+  const titleB = tokenizeEventText(b.title);
+  const sharedTitleTokens = intersectionSize(titleA, titleB);
+  if (sharedTitleTokens >= 4 && overlapCoefficient(titleA, titleB) >= 0.65) return true;
+
+  const keywordsA = tokenizeEventText(a.breakdown.keywords.join(' '));
+  const keywordsB = tokenizeEventText(b.breakdown.keywords.join(' '));
+  const sharedDistinctiveKeywords = [...keywordsA]
+    .filter(token => keywordsB.has(token) && !EVENT_GENERIC_TOKENS.has(token));
+  return sharedTitleTokens >= 3
+    && sharedDistinctiveKeywords.length >= 2
+    && overlapCoefficient(titleA, titleB) >= 0.5;
+}
+
+function deduplicateRankedEvents<T extends RankableArticle>(articles: T[]): T[] {
+  const clusters: T[][] = [];
+  for (const article of articles) {
+    const cluster = clusters.find(items => items.some(item => isSameDigestEvent(item, article)));
+    if (cluster) cluster.push(article);
+    else clusters.push([article]);
+  }
+  return clusters.map(cluster => [...cluster].sort(compareEventRepresentatives)[0]!);
+}
+
+function normalizeArticleUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.hash = '';
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(utm_|ref$|source$|campaign$)/i.test(key)) url.searchParams.delete(key);
+    }
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return value.trim().replace(/\/$/, '');
+  }
+}
+
+function appearedInRecentDigest(article: RankableArticle, history: DigestHistoryEntry[]): boolean {
+  const normalizedLink = normalizeArticleUrl(article.link);
+  const titleTokens = tokenizeEventText(article.title);
+  return history.some(entry => {
+    if (normalizeArticleUrl(entry.link) === normalizedLink) return true;
+    const previousTokens = tokenizeEventText(entry.title);
+    return intersectionSize(titleTokens, previousTokens) >= 4
+      && overlapCoefficient(titleTokens, previousTokens) >= 0.8;
+  });
+}
+
+function applySourceTopLimits<T extends RankableArticle>(articles: T[], topN: number): T[] {
+  const selected: T[] = [];
+  const sourceCounts = new Map<string, number>();
+  for (const article of articles) {
+    const count = sourceCounts.get(article.sourceName) || 0;
+    if (article.sourceMaxTopItems !== undefined && count >= article.sourceMaxTopItems) continue;
+    selected.push(article);
+    sourceCounts.set(article.sourceName, count + 1);
+    if (selected.length >= topN) break;
+  }
+  return selected.length > 0 ? selected : articles.slice(0, Math.min(1, topN));
+}
+
+export function rankArticles<T extends RankableArticle>(
   articles: T[],
-  topN: number
+  topN: number,
+  recentHistory: DigestHistoryEntry[] = []
 ): T[] {
-  const matched = articles.filter(article => article.breakdown.projectMatches.length > 0);
+  const uniqueArticles = deduplicateRankedEvents(articles);
+  const sourceLimitedNames = new Set(uniqueArticles
+    .filter(article => article.sourceMaxTopItems !== undefined)
+    .map(article => article.sourceName)
+    .filter(sourceName => {
+      const sourceArticles = uniqueArticles.filter(article => article.sourceName === sourceName);
+      return sourceArticles.length > (sourceArticles[0]?.sourceMaxTopItems || Infinity);
+    }));
+  const matched = uniqueArticles.filter(article => article.breakdown.projectMatches.length > 0);
+  let ordered: T[];
 
   if (matched.length >= 3) {
     const matchedFirst = [...matched].sort(compareProjectRank);
-    const unmatched = articles
+    const unmatched = uniqueArticles
       .filter(article => article.breakdown.projectMatches.length === 0)
       .sort(compareGenericRank);
-    return [...matchedFirst, ...unmatched].slice(0, topN);
-  }
-
-  return [...articles]
-    .sort((a, b) =>
+    ordered = [...matchedFirst, ...unmatched];
+  } else {
+    ordered = [...uniqueArticles].sort((a, b) =>
       b.projectAwareScore - a.projectAwareScore
       || b.genericScore - a.genericScore
       || b.pubDate.getTime() - a.pubDate.getTime()
-    )
-    .slice(0, topN);
+    );
+  }
+
+  const fresh = ordered.filter(article => !appearedInRecentDigest(article, recentHistory));
+  const coolingDown = ordered.filter(article => appearedInRecentDigest(article, recentHistory));
+  console.log(
+    `[digest] Top ranking controls: uniqueEvents=${uniqueArticles.length}/${articles.length}, `
+    + `duplicates=${articles.length - uniqueArticles.length}, cooldownCandidates=${coolingDown.length}, `
+    + `sourceCaps=${[...sourceLimitedNames].join(', ') || 'none'}`
+  );
+  const selected = applySourceTopLimits(fresh, topN);
+  if (selected.length >= topN || coolingDown.length === 0) return selected;
+
+  const selectedSet = new Set(selected);
+  return applySourceTopLimits(
+    [...selected, ...coolingDown.filter(article => !selectedSet.has(article))],
+    topN
+  );
+}
+
+export function extractTopDigestHistory(markdown: string): DigestHistoryEntry[] {
+  const section = markdown.match(/## 🏆 今日必读\s*\n([\s\S]*?)(?:\n---\s*\n|\n## )/)?.[1] || '';
+  const matches = [
+    ...section.matchAll(/^\[([^\]]+)]\((https?:\/\/[^)\s]+)\)\s+—/gm),
+    ...markdown.matchAll(/^### \d+\. .+\n\n\[([^\]]+)]\((https?:\/\/[^)\s]+)\)\s+—/gm),
+  ];
+  const entries = new Map<string, DigestHistoryEntry>();
+  for (const match of matches) {
+    const entry = { title: match[1]!.trim(), link: match[2]!.trim() };
+    entries.set(normalizeArticleUrl(entry.link), entry);
+  }
+  return [...entries.values()];
+}
+
+async function loadRecentDigestHistory(outputPath: string, now = new Date()): Promise<DigestHistoryEntry[]> {
+  const directory = dirname(outputPath);
+  const currentName = basename(outputPath);
+  const cutoff = now.getTime() - DIGEST_COOLDOWN_HOURS * 60 * 60 * 1000;
+  try {
+    const files = await readdir(directory);
+    const recentFiles = files.filter(name => {
+      if (name === currentName) return false;
+      const match = name.match(/^digest-(\d{4})(\d{2})(\d{2})\.md$/);
+      if (!match) return false;
+      const fileDate = new Date(`${match[1]}-${match[2]}-${match[3]}T23:59:59Z`).getTime();
+      return fileDate >= cutoff && fileDate <= now.getTime() + 24 * 60 * 60 * 1000;
+    });
+    const reports = await Promise.all(recentFiles.map(name => readFile(`${directory}/${name}`, 'utf8')));
+    return reports.flatMap(extractTopDigestHistory);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[digest] Recent digest history unavailable (${message}); skipping ${DIGEST_COOLDOWN_HOURS}h cooldown`);
+    return [];
+  }
 }
 
 interface ProjectIntelligenceCandidate<T> {
@@ -1986,29 +2224,6 @@ function intersectionSize(a: Set<string>, b: Set<string>): number {
 function overlapCoefficient(a: Set<string>, b: Set<string>): number {
   const denominator = Math.min(a.size, b.size);
   return denominator === 0 ? 0 : intersectionSize(a, b) / denominator;
-}
-
-export function isSameProjectEvent<T extends { title: string; description?: string; breakdown: ArticleScore }>(a: T, b: T): boolean {
-  const titleA = tokenizeEventText(a.title);
-  const titleB = tokenizeEventText(b.title);
-  const sharedTitleTokens = intersectionSize(titleA, titleB);
-  if (sharedTitleTokens >= 4 && overlapCoefficient(titleA, titleB) >= 0.6) return true;
-
-  const keywordsA = tokenizeEventText(a.breakdown.keywords.join(' '));
-  const keywordsB = tokenizeEventText(b.breakdown.keywords.join(' '));
-  const sharedKeywords = Array.from(keywordsA).filter(token => keywordsB.has(token));
-  const sharedDistinctiveKeywords = sharedKeywords.filter(token => !EVENT_GENERIC_TOKENS.has(token));
-
-  if (sharedKeywords.length >= 4
-    && sharedDistinctiveKeywords.length >= 1
-    && overlapCoefficient(keywordsA, keywordsB) >= 0.5) return true;
-
-  const contextA = tokenizeEventText(`${a.title} ${a.description || ''} ${a.breakdown.keywords.join(' ')}`);
-  const contextB = tokenizeEventText(`${b.title} ${b.description || ''} ${b.breakdown.keywords.join(' ')}`);
-  const sharedContext = Array.from(contextA).filter(token => contextB.has(token));
-  const sharedDistinctiveContext = sharedContext.filter(token => !EVENT_GENERIC_TOKENS.has(token));
-
-  return sharedContext.length >= 6 && sharedDistinctiveContext.length >= 3;
 }
 
 function getHostname(value: string): string {
@@ -2098,7 +2313,7 @@ export function selectProjectIntelligenceCandidates<
     const eventClusters: Array<Array<ProjectEventCandidate<T>>> = [];
     for (const candidate of eligible) {
       const cluster = eventClusters.find(items =>
-        items.some(item => isSameProjectEvent(item.article, candidate.article))
+        items.some(item => isSameDigestEvent(item.article, candidate.article))
       );
       if (cluster) cluster.push(candidate);
       else eventClusters.push([candidate]);
@@ -2353,7 +2568,7 @@ Environment:
   OPENAI_MODEL     Optional OpenAI-compatible model (default: deepseek-v4-flash for DeepSeek base, else gpt-4o-mini)
   AI_PRIMARY_PROVIDER Preferred provider: gemini, openai, or deepseek (default: gemini)
   AI_REQUEST_TIMEOUT_MS Per-request timeout in milliseconds (default: 180000)
-  DEEPSEEK_THINKING_TASKS Comma-separated tasks: scoring,summary,highlights,design; all or none (default: scoring,highlights)
+  DEEPSEEK_THINKING_TASKS Comma-separated tasks: project-scoring,summary,highlights,design; all or none (default: project-scoring,highlights)
   RSSHUB_BASE_URL  RSSHub instance URL for X/Twitter feeds (default: https://rsshub.app)
   X_ACCOUNTS       Comma-separated X/Twitter accounts to follow (e.g. karpathy,sama,ylecun)
   PROJECTS_CONFIG_PATH Optional project profile JSON path (default: config/projects.json)
@@ -2496,7 +2711,11 @@ async function main(): Promise<void> {
     console.log(`[digest] Project-matched articles: ${projectMatchedCount}/${scoredArticles.length}`);
   }
 
-  const topArticles = rankArticles(scoredArticles, topN);
+  const recentDigestHistory = await loadRecentDigestHistory(outputPath);
+  if (recentDigestHistory.length > 0) {
+    console.log(`[digest] Recent digest cooldown: ${recentDigestHistory.length} Top N article(s) loaded from the last ${DIGEST_COOLDOWN_HOURS}h`);
+  }
+  const topArticles = rankArticles(scoredArticles, topN, recentDigestHistory);
   const projectCandidates = selectProjectIntelligenceCandidates(scoredArticles, projects);
   
   console.log(`[digest] Top ${topN} articles selected (score range: ${topArticles[topArticles.length - 1]?.projectAwareScore || 0} - ${topArticles[0]?.projectAwareScore || 0})`);

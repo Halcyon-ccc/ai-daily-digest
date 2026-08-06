@@ -140,7 +140,7 @@ OPENAI_API_KEY=your-key \
 OPENAI_API_BASE=https://api.deepseek.com/v1 \
 OPENAI_MODEL=deepseek-v4-flash \
 AI_PRIMARY_PROVIDER=openai \
-DEEPSEEK_THINKING_TASKS=scoring,highlights \
+DEEPSEEK_THINKING_TASKS=project-scoring,highlights \
 bun scripts/digest.ts \
   --hours 24 \
   --top-n 15 \

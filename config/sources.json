@@ -5,6 +5,7 @@
       "xmlUrl": "https://rss.arxiv.org/rss/cs.MA",
       "htmlUrl": "https://arxiv.org/list/cs.MA/recent",
       "tier": "research",
+      "maxTopItems": 3,
       "tags": ["multi-agent", "research"]
     },
     {
