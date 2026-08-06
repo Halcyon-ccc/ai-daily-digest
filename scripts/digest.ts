@@ -1,5 +1,5 @@
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
-import { basename, dirname } from 'node:path';
+import { dirname } from 'node:path';
 import process from 'node:process';
 
 // ============================================================================
@@ -14,6 +14,7 @@ const FEED_CONCURRENCY = 10;
 const GEMINI_BATCH_SIZE = 10;
 const SCORING_BATCH_SIZE = 8;
 const SCORING_MAX_ATTEMPTS = 2;
+const SUMMARY_MAX_ATTEMPTS = 2;
 const MAX_CONCURRENT_GEMINI = 2;
 const DEFAULT_AI_REQUEST_TIMEOUT_MS = 180_000;
 const DEFAULT_DEEPSEEK_THINKING_TASKS = 'project-scoring,highlights';
@@ -40,6 +41,12 @@ const EVENT_STOP_WORDS = new Set([
   'about', 'after', 'against', 'from', 'have', 'including', 'into', 'more',
   'than', 'that', 'their', 'the', 'this', 'with', 'without', 'your',
 ]);
+const EVENT_ACTION_GROUPS = [
+  ['leave', 'leaves', 'leaving', 'left', 'depart', 'departs', 'departing', 'resign', 'resigns', 'resigned', 'step down', 'steps down', 'stepped down'],
+  ['launch', 'launches', 'launched', 'release', 'releases', 'released', 'unveil', 'unveils', 'unveiled'],
+  ['acquire', 'acquires', 'acquired', 'acquisition', 'buy', 'buys', 'bought'],
+  ['hack', 'hacks', 'hacked', 'breach', 'breaches', 'breached', 'attack', 'attacks', 'attacked'],
+];
 
 // 96 RSS feeds from Hacker News Popularity Contest 2025 (curated by Karpathy)
 const RSS_FEEDS: FeedSource[] = [
@@ -280,12 +287,13 @@ interface GeminiScoringResult {
 }
 
 interface GeminiSummaryResult {
-  results: Array<{
-    index: number;
-    titleZh: string;
-    summary: string;
-    reason: string;
-  }>;
+  results?: unknown;
+}
+
+interface ArticleSummary {
+  titleZh: string;
+  summary: string;
+  reason: string;
 }
 
 type AITask = 'scoring' | 'project-scoring' | 'summary' | 'highlights' | 'design';
@@ -1459,7 +1467,7 @@ ${projects.map(project => `### ${project.id}: ${project.name}
 
 项目匹配规则：
 1. 一篇文章可以匹配 0 个、1 个或多个项目。
-2. 只返回达到对应项目“匹配最低分”的项目匹配。
+2. 必须逐个、独立评估每个项目，并返回所有达到对应项目“匹配最低分”的匹配；不能只返回最相关的一个项目。
 3. projectId 必须来自上方项目 ID，不能编造。
 4. 关键词重合本身不足以给高分，必须结合文章主题判断。
 5. 配置了“必须同时满足的信号组”时，文章标题或描述必须对每一组都明确命中至少一个信号；辅助信号、关键词或实体不能代替任何缺失的组。
@@ -1471,6 +1479,7 @@ ${projects.map(project => `### ${project.id}: ${project.name}
 11. whyRelevant 必须用中文指出满足各必要信号组的具体证据，并说明它为何与项目相关。
 12. recommendedAction 必须用中文给出具体下一步动作。
 13. 具体动作可以包括：加入评测候选池、与当前架构对比、阅读技术文档、复现实验、增加安全检查、跟踪上游项目等。
+14. 明确描述 multi-agent 系统的架构、构建、实现、编排、协作或生产部署时，应独立评估多 Agent 架构项目，即使同一文章也涉及安全或合规。
 `;
 
   const projectJsonExample = projects.length === 0
@@ -1735,7 +1744,7 @@ ${langInstruction}
 
 ${articlesList}
 
-请严格按 JSON 格式返回：
+请严格按 JSON 格式返回。必须为上方每个 Index 返回且只返回一个完整结果，index 必须原样保留；不能省略任何文章：
 {
   "results": [
     {
@@ -1748,12 +1757,38 @@ ${articlesList}
 }`;
 }
 
-async function summarizeArticles(
+function validateSummaryResult(raw: unknown, allowedIndices: Set<number>): { index: number; summary: ArticleSummary } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const record = raw as Record<string, unknown>;
+  const index = typeof record.index === 'number'
+    ? record.index
+    : typeof record.index === 'string' && /^\d+$/.test(record.index.trim())
+      ? Number(record.index)
+      : NaN;
+  if (!Number.isInteger(index) || !allowedIndices.has(index)) return null;
+
+  const titleZh = typeof record.titleZh === 'string' ? record.titleZh.trim() : '';
+  const summary = typeof record.summary === 'string' ? record.summary.trim() : '';
+  const reason = typeof record.reason === 'string' ? record.reason.trim() : '';
+  if (!titleZh || summary.length < 20 || !reason) return null;
+  return { index, summary: { titleZh, summary, reason } };
+}
+
+function buildSummaryFallback(article: { title: string; description: string }): ArticleSummary {
+  const cleaned = stripHtml(stripHtml(article.description)).replace(/\s+/g, ' ').trim();
+  return {
+    titleZh: article.title,
+    summary: (cleaned || article.title).slice(0, 500),
+    reason: '',
+  };
+}
+
+export async function summarizeArticles(
   articles: Array<Article & { index: number }>,
   aiClient: AIClient,
   lang: 'zh' | 'en'
-): Promise<Map<number, { titleZh: string; summary: string; reason: string }>> {
-  const summaries = new Map<number, { titleZh: string; summary: string; reason: string }>();
+): Promise<Map<number, ArticleSummary>> {
+  const summaries = new Map<number, ArticleSummary>();
   
   const indexed = articles.map(a => ({
     index: a.index,
@@ -1773,25 +1808,42 @@ async function summarizeArticles(
   for (let i = 0; i < batches.length; i += MAX_CONCURRENT_GEMINI) {
     const batchGroup = batches.slice(i, i + MAX_CONCURRENT_GEMINI);
     const promises = batchGroup.map(async (batch) => {
-      try {
-        const prompt = buildSummaryPrompt(batch, lang);
-        const responseText = await aiClient.call(prompt, 'summary');
-        const parsed = parseJsonResponse<GeminiSummaryResult>(responseText);
-        
-        if (parsed.results && Array.isArray(parsed.results)) {
-          for (const result of parsed.results) {
-            summaries.set(result.index, {
-              titleZh: result.titleZh || '',
-              summary: result.summary || '',
-              reason: result.reason || '',
-            });
+      let remaining = [...batch];
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= SUMMARY_MAX_ATTEMPTS && remaining.length > 0; attempt++) {
+        try {
+          const prompt = buildSummaryPrompt(remaining, lang);
+          const responseText = await aiClient.call(prompt, 'summary');
+          const parsed = parseJsonResponse<GeminiSummaryResult>(responseText);
+          if (!Array.isArray(parsed.results)) {
+            throw new Error('Summary response does not contain a results array');
+          }
+
+          const allowedIndices = new Set(remaining.map(item => item.index));
+          for (const rawResult of parsed.results) {
+            const result = validateSummaryResult(rawResult, allowedIndices);
+            if (result) summaries.set(result.index, result.summary);
+          }
+          remaining = remaining.filter(item => !summaries.has(item.index));
+          if (remaining.length === 0) return;
+          throw new Error(`Summary response omitted or invalidated ${remaining.length} result(s)`);
+        } catch (error) {
+          lastError = error;
+          if (attempt < SUMMARY_MAX_ATTEMPTS) {
+            console.warn(
+              `[digest] Summary batch attempt ${attempt}/${SUMMARY_MAX_ATTEMPTS} incomplete `
+              + `(${error instanceof Error ? error.message : String(error)}); retrying ${remaining.length} missing article(s)`
+            );
           }
         }
-      } catch (error) {
-        console.warn(`[digest] Summary batch failed: ${error instanceof Error ? error.message : String(error)}`);
-        for (const item of batch) {
-          summaries.set(item.index, { titleZh: item.title, summary: item.title, reason: '' });
-        }
+      }
+
+      if (remaining.length > 0) {
+        console.warn(
+          `[digest] Summary batch incomplete after ${SUMMARY_MAX_ATTEMPTS} attempts `
+          + `(${lastError instanceof Error ? lastError.message : String(lastError)}); using clean fallback for ${remaining.length} article(s)`
+        );
+        for (const item of remaining) summaries.set(item.index, buildSummaryFallback(item));
       }
     });
     
@@ -2043,13 +2095,32 @@ function compareEventRepresentatives<T extends RankableArticle>(a: T, b: T): num
     || b.pubDate.getTime() - a.pubDate.getTime();
 }
 
+function titlesDescribeSameEvent(titleAValue: string, titleBValue: string): boolean {
+  const titleA = tokenizeEventText(titleAValue);
+  const titleB = tokenizeEventText(titleBValue);
+  const sharedTitleTokens = intersectionSize(titleA, titleB);
+  if (sharedTitleTokens >= 4 && overlapCoefficient(titleA, titleB) >= 0.65) return true;
+
+  const normalizedA = normalizeSignalText(titleAValue);
+  const normalizedB = normalizeSignalText(titleBValue);
+  const sameAction = EVENT_ACTION_GROUPS.some(group =>
+    group.some(action => normalizedA.includes(` ${action} `))
+    && group.some(action => normalizedB.includes(` ${action} `))
+  );
+  if (!sameAction) return false;
+
+  const sharedDistinctiveTokens = [...titleA]
+    .filter(token => titleB.has(token) && !EVENT_GENERIC_TOKENS.has(token));
+  return sharedDistinctiveTokens.length >= 2 && overlapCoefficient(titleA, titleB) >= 0.5;
+}
+
 export function isSameDigestEvent<T extends RankableArticle>(a: T, b: T): boolean {
   if (normalizeArticleUrl(a.link) === normalizeArticleUrl(b.link)) return true;
 
   const titleA = tokenizeEventText(a.title);
   const titleB = tokenizeEventText(b.title);
   const sharedTitleTokens = intersectionSize(titleA, titleB);
-  if (sharedTitleTokens >= 4 && overlapCoefficient(titleA, titleB) >= 0.65) return true;
+  if (titlesDescribeSameEvent(a.title, b.title)) return true;
 
   const keywordsA = tokenizeEventText(a.breakdown.keywords.join(' '));
   const keywordsB = tokenizeEventText(b.breakdown.keywords.join(' '));
@@ -2085,12 +2156,9 @@ function normalizeArticleUrl(value: string): string {
 
 function appearedInRecentDigest(article: RankableArticle, history: DigestHistoryEntry[]): boolean {
   const normalizedLink = normalizeArticleUrl(article.link);
-  const titleTokens = tokenizeEventText(article.title);
   return history.some(entry => {
     if (normalizeArticleUrl(entry.link) === normalizedLink) return true;
-    const previousTokens = tokenizeEventText(entry.title);
-    return intersectionSize(titleTokens, previousTokens) >= 4
-      && overlapCoefficient(titleTokens, previousTokens) >= 0.8;
+    return titlesDescribeSameEvent(article.title, entry.title);
   });
 }
 
@@ -2168,21 +2236,23 @@ export function extractTopDigestHistory(markdown: string): DigestHistoryEntry[] 
   return [...entries.values()];
 }
 
-async function loadRecentDigestHistory(outputPath: string, now = new Date()): Promise<DigestHistoryEntry[]> {
+export async function loadRecentDigestHistory(outputPath: string, now = new Date()): Promise<DigestHistoryEntry[]> {
   const directory = dirname(outputPath);
-  const currentName = basename(outputPath);
   const cutoff = now.getTime() - DIGEST_COOLDOWN_HOURS * 60 * 60 * 1000;
   try {
     const files = await readdir(directory);
     const recentFiles = files.filter(name => {
-      if (name === currentName) return false;
       const match = name.match(/^digest-(\d{4})(\d{2})(\d{2})\.md$/);
       if (!match) return false;
       const fileDate = new Date(`${match[1]}-${match[2]}-${match[3]}T23:59:59Z`).getTime();
       return fileDate >= cutoff && fileDate <= now.getTime() + 24 * 60 * 60 * 1000;
     });
     const reports = await Promise.all(recentFiles.map(name => readFile(`${directory}/${name}`, 'utf8')));
-    return reports.flatMap(extractTopDigestHistory);
+    const entries = new Map<string, DigestHistoryEntry>();
+    for (const entry of reports.flatMap(extractTopDigestHistory)) {
+      entries.set(normalizeArticleUrl(entry.link), entry);
+    }
+    return [...entries.values()];
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[digest] Recent digest history unavailable (${message}); skipping ${DIGEST_COOLDOWN_HOURS}h cooldown`);
