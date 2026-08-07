@@ -212,7 +212,7 @@ bun scripts/projects.ts add \
 
 ### 修改 RSS 源
 
-在 `config/sources.json` 中添加、停用或调整额外 RSS/Atom 源。来源可标记为 `first-party`、`research`、`community` 或 `aggregator`，并通过 `tags` 与项目偏好关联。内置通用来源仍保留在 `scripts/digest.ts`。
+在 `config/sources.json` 中添加、停用或调整额外 RSS/Atom 源。来源可标记为 `first-party`、`research`、`secondary`、`community` 或 `aggregator`，并通过 `tags` 与项目偏好关联。`secondary` 表示可追溯的二手媒体来源；通用榜默认对同一二手来源采用 2 条软上限，候选不足时仍会回填。内置通用来源仍保留在 `scripts/digest.ts`。
 
 ### 修改 X 账号
 

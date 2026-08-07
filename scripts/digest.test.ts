@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   satisfiesRequiredSignalGroups,
+  assessVerificationStatus,
   buildOpenAIRequestBody,
   createAIClient,
   scoreArticlesWithAI,
@@ -121,6 +122,16 @@ describe('config validation', () => {
     expect(sources[0]?.tier).toBe('research');
     expect(sources[0]?.tags).toEqual(['multi-agent']);
     expect(sources[0]?.maxTopItems).toBe(3);
+
+    const [secondary] = validateSourcesConfig({
+      sources: [{
+        name: 'Secondary publication',
+        xmlUrl: 'https://secondary.example/feed',
+        htmlUrl: 'https://secondary.example',
+        tier: 'secondary',
+      }],
+    });
+    expect(secondary?.tier).toBe('secondary');
   });
 
   test('falls back to built-in sources when additional config is missing', async () => {
@@ -221,6 +232,46 @@ describe('global digest ranking', () => {
     const community = { ...makeArticle('Community analysis', 'https://community.example/analysis', 'Community', 25), description: detailed, sourceTier: 'community' as const };
     const official = { ...makeArticle('Official technical release', 'https://official.example/release', 'Official', 24), description: detailed, sourceTier: 'first-party' as const };
     expect(rankArticles([community, official], 1)[0]?.sourceName).toBe('Official');
+  });
+
+  test('distinguishes first-party, traceable secondary, and unverified reporting', () => {
+    expect(assessVerificationStatus({
+      title: 'Official model release',
+      description: 'The vendor publishes model evaluations and availability details.',
+      sourceTier: 'first-party',
+    })).toBe('first-party');
+    expect(assessVerificationStatus({
+      title: 'Microsoft AI revenue reportedly depends on a partner',
+      description: 'According to Bloomberg analysis, the partner contributes most of the revenue.',
+      sourceTier: 'secondary',
+    })).toBe('traceable-secondary');
+    expect(assessVerificationStatus({
+      title: 'Models reportedly coordinated attacks',
+      description: 'The claim comes from attendee notes shared in a social media post.',
+      sourceTier: 'secondary',
+    })).toBe('unverified');
+  });
+
+  test('soft-caps secondary sources and backfills them only when needed', () => {
+    const description = 'Detailed reporting with concrete figures, technical context, named systems, and enough evidence for ranking.';
+    const secondary = [30, 29, 28, 27].map((score, index) => ({
+      ...makeArticle(`Secondary report ${index}`, `https://secondary.example/${index}`, 'Secondary', score),
+      description,
+      sourceTier: 'secondary' as const,
+    }));
+    const alternatives = [26, 25].map((score, index) => ({
+      ...makeArticle(`Independent report ${index}`, `https://independent.example/${index}`, `Independent ${index}`, score),
+      description,
+      sourceTier: 'community' as const,
+    }));
+
+    const diversified = rankArticles([...secondary, ...alternatives], 4);
+    expect(diversified.filter(article => article.sourceName === 'Secondary')).toHaveLength(2);
+    expect(diversified).toHaveLength(4);
+
+    const backfilled = rankArticles(secondary.slice(0, 3), 3);
+    expect(backfilled).toHaveLength(3);
+    expect(backfilled.every(article => article.sourceName === 'Secondary')).toBe(true);
   });
 });
 
@@ -340,6 +391,7 @@ describe('AI scoring batches', () => {
 
   test('keeps every qualifying project match for a production multi-agent article', async () => {
     const projects = validateProjectsConfig(await Bun.file('config/projects.json').json());
+    const projectPrompts: string[] = [];
     const article = {
       title: 'How LendingTree built a multi-agent mortgage assistant on Amazon Bedrock',
       description: 'A production implementation with coordinated agents, tool authorization, guardrails, and compliance controls.',
@@ -350,7 +402,8 @@ describe('AI scoring batches', () => {
       sourceTier: 'first-party' as const,
     };
     const aiClient = {
-      async call(_prompt: string, task: string): Promise<string> {
+      async call(prompt: string, task: string): Promise<string> {
+        if (task === 'project-scoring') projectPrompts.push(prompt);
         return JSON.stringify({
           results: [{
             index: 0,
@@ -382,6 +435,11 @@ describe('AI scoring batches', () => {
       'agent-security',
       'multi-agent-architecture',
     ]);
+    expect(projectPrompts).toHaveLength(1);
+    expect(projectPrompts[0]).toContain('### agent-security:');
+    expect(projectPrompts[0]).toContain('### multi-agent-architecture:');
+    expect(projectPrompts[0]).not.toContain('### asr-voice:');
+    expect(projectPrompts[0]).not.toContain('### ocr-product:');
   });
 });
 
@@ -588,5 +646,7 @@ describe('per-project selection', () => {
       fresh.link,
       cooledHigh.link,
     ]);
+    expect(selected.find(item => item.article.link === fresh.link)?.cooldownProjectIds).toEqual([]);
+    expect(selected.find(item => item.article.link === cooledHigh.link)?.cooldownProjectIds).toEqual(['asr']);
   });
 });
