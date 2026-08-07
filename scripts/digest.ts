@@ -20,9 +20,12 @@ const DEFAULT_AI_REQUEST_TIMEOUT_MS = 180_000;
 const DEFAULT_DEEPSEEK_THINKING_TASKS = 'project-scoring,highlights';
 const DEFAULT_PROJECTS_CONFIG_PATH = 'config/projects.json';
 const DEFAULT_SOURCES_CONFIG_PATH = 'config/sources.json';
+const DESIGN_SECTION_ENABLED = /^(1|true|yes|on)$/i.test(process.env.DESIGN_SECTION_ENABLED?.trim() || '');
 const MAX_PROJECT_MATCHES_PER_ARTICLE = 5;
 const MAX_PROJECT_TEXT_LENGTH = 240;
 const DIGEST_COOLDOWN_HOURS = 48;
+const FIRST_PARTY_RANKING_BONUS = 2;
+const MAX_LOW_INFORMATION_PENALTY = 3;
 const AGGREGATOR_HOSTS = new Set([
   'news.ycombinator.com',
   'reddit.com',
@@ -1512,6 +1515,7 @@ ${projects.map(project => `### ${project.id}: ${project.name}
 - 7-9: 有深度，观点独到
 - 4-6: 信息准确，表达清晰
 - 1-3: 浅尝辄止或纯转述
+- RSS 摘要过短、几乎只是重复标题、只有“阅读全文”等占位文本，或核心事实仍是未经证实的传闻时，应降低质量分；不要替文章补充摘要中没有的事实
 
 ### 3. 时效性 (timeliness) - 当前是否值得阅读
 - 10: 正在发生的重大事件/刚发布的重要工具
@@ -2051,8 +2055,50 @@ function getProjectAwareScore(score: ArticleScore): number {
   return score.quality + score.timeliness + bestMatch.projectRelevance * 2 + bestMatch.actionability;
 }
 
-function compareGenericRank(a: { genericScore: number; pubDate: Date }, b: { genericScore: number; pubDate: Date }): number {
-  return b.genericScore - a.genericScore || b.pubDate.getTime() - a.pubDate.getTime();
+function getLowInformationPenalty(article: { title: string; description: string }): number {
+  const title = stripHtml(article.title).replace(/\s+/g, ' ').trim();
+  const description = stripHtml(article.description).replace(/\s+/g, ' ').trim();
+  const normalizedTitle = normalizeSignalText(title).trim();
+  const normalizedDescription = normalizeSignalText(description).trim();
+  let penalty = 0;
+
+  if (description.length < 40) penalty += 2;
+  else if (description.length < 100) penalty += 1;
+
+  if (!description
+    || normalizedDescription === normalizedTitle
+    || (normalizedDescription.startsWith(normalizedTitle) && normalizedDescription.length - normalizedTitle.length < 40)
+    || /^(read more|continue reading|click here|learn more|no (?:summary|description)|暂无摘要|阅读全文|点击查看)/i.test(description)) {
+    penalty += 1;
+  }
+
+  if (/\b(?:rumou?red?|reportedly|allegedly|unconfirmed|speculation|unclear|possibly|may|might|could)\b|据传|传闻|疑似|可能|或许|尚未证实|未经证实|据称|似乎|不确定/i.test(description)) {
+    penalty += 1;
+  }
+
+  return Math.min(MAX_LOW_INFORMATION_PENALTY, penalty);
+}
+
+export function getGenericRankingAdjustment(article: { title: string; description: string; sourceTier?: SourceTier }): number {
+  const sourceBonus = article.sourceTier === 'first-party' ? FIRST_PARTY_RANKING_BONUS : 0;
+  return sourceBonus - getLowInformationPenalty(article);
+}
+
+function getAdjustedGenericScore(article: { title: string; description: string; sourceTier?: SourceTier; genericScore: number }): number {
+  return article.genericScore + getGenericRankingAdjustment(article);
+}
+
+function getAdjustedProjectAwareScore(article: { title: string; description: string; sourceTier?: SourceTier; projectAwareScore: number }): number {
+  return article.projectAwareScore + getGenericRankingAdjustment(article);
+}
+
+function compareGenericRank(
+  a: { title: string; description: string; sourceTier?: SourceTier; genericScore: number; pubDate: Date },
+  b: { title: string; description: string; sourceTier?: SourceTier; genericScore: number; pubDate: Date }
+): number {
+  return getAdjustedGenericScore(b) - getAdjustedGenericScore(a)
+    || b.genericScore - a.genericScore
+    || b.pubDate.getTime() - a.pubDate.getTime();
 }
 
 function compareProjectRank(
@@ -2064,6 +2110,7 @@ function compareProjectRank(
   return (bestB?.projectRelevance || 0) - (bestA?.projectRelevance || 0)
     || (bestB?.actionability || 0) - (bestA?.actionability || 0)
     || b.projectAwareScore - a.projectAwareScore
+    || getAdjustedGenericScore(b) - getAdjustedGenericScore(a)
     || b.genericScore - a.genericScore
     || b.pubDate.getTime() - a.pubDate.getTime();
 }
@@ -2199,7 +2246,9 @@ export function rankArticles<T extends RankableArticle>(
     ordered = [...matchedFirst, ...unmatched];
   } else {
     ordered = [...uniqueArticles].sort((a, b) =>
-      b.projectAwareScore - a.projectAwareScore
+      getAdjustedProjectAwareScore(b) - getAdjustedProjectAwareScore(a)
+      || getAdjustedGenericScore(b) - getAdjustedGenericScore(a)
+      || b.projectAwareScore - a.projectAwareScore
       || b.genericScore - a.genericScore
       || b.pubDate.getTime() - a.pubDate.getTime()
     );
@@ -2207,9 +2256,12 @@ export function rankArticles<T extends RankableArticle>(
 
   const fresh = ordered.filter(article => !appearedInRecentDigest(article, recentHistory));
   const coolingDown = ordered.filter(article => appearedInRecentDigest(article, recentHistory));
+  const firstPartyBoosted = uniqueArticles.filter(article => article.sourceTier === 'first-party').length;
+  const lowInformationPenalized = uniqueArticles.filter(article => getLowInformationPenalty(article) > 0).length;
   console.log(
     `[digest] Top ranking controls: uniqueEvents=${uniqueArticles.length}/${articles.length}, `
     + `duplicates=${articles.length - uniqueArticles.length}, cooldownCandidates=${coolingDown.length}, `
+    + `firstPartyBoosted=${firstPartyBoosted}, lowInformationPenalized=${lowInformationPenalized}, `
     + `sourceCaps=${[...sourceLimitedNames].join(', ') || 'none'}`
   );
   const selected = applySourceTopLimits(fresh, topN);
@@ -2236,7 +2288,22 @@ export function extractTopDigestHistory(markdown: string): DigestHistoryEntry[] 
   return [...entries.values()];
 }
 
-export async function loadRecentDigestHistory(outputPath: string, now = new Date()): Promise<DigestHistoryEntry[]> {
+export function extractProjectDigestHistory(markdown: string): DigestHistoryEntry[] {
+  const section = markdown.match(/## 🎯 项目相关情报\s*\n([\s\S]*?)(?:\n---\s*\n|$)/)?.[1] || '';
+  const entries = new Map<string, DigestHistoryEntry>();
+  for (const match of section.matchAll(/^#### \[([^\]]+)]\((https?:\/\/[^)\s]+)\)/gm)) {
+    const entry = { title: match[1]!.trim(), link: match[2]!.trim() };
+    entries.set(normalizeArticleUrl(entry.link), entry);
+  }
+  return [...entries.values()];
+}
+
+async function loadRecentHistory(
+  outputPath: string,
+  extractor: (markdown: string) => DigestHistoryEntry[],
+  historyLabel: string,
+  now: Date
+): Promise<DigestHistoryEntry[]> {
   const directory = dirname(outputPath);
   const cutoff = now.getTime() - DIGEST_COOLDOWN_HOURS * 60 * 60 * 1000;
   try {
@@ -2249,15 +2316,23 @@ export async function loadRecentDigestHistory(outputPath: string, now = new Date
     });
     const reports = await Promise.all(recentFiles.map(name => readFile(`${directory}/${name}`, 'utf8')));
     const entries = new Map<string, DigestHistoryEntry>();
-    for (const entry of reports.flatMap(extractTopDigestHistory)) {
+    for (const entry of reports.flatMap(extractor)) {
       entries.set(normalizeArticleUrl(entry.link), entry);
     }
     return [...entries.values()];
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[digest] Recent digest history unavailable (${message}); skipping ${DIGEST_COOLDOWN_HOURS}h cooldown`);
+    console.warn(`[digest] Recent ${historyLabel} history unavailable (${message}); skipping ${DIGEST_COOLDOWN_HOURS}h cooldown`);
     return [];
   }
+}
+
+export async function loadRecentDigestHistory(outputPath: string, now = new Date()): Promise<DigestHistoryEntry[]> {
+  return loadRecentHistory(outputPath, extractTopDigestHistory, 'generic digest', now);
+}
+
+export async function loadRecentProjectDigestHistory(outputPath: string, now = new Date()): Promise<DigestHistoryEntry[]> {
+  return loadRecentHistory(outputPath, extractProjectDigestHistory, 'project digest', now);
 }
 
 interface ProjectIntelligenceCandidate<T> {
@@ -2365,7 +2440,7 @@ function compareProjectEventCandidates<
 
 export function selectProjectIntelligenceCandidates<
   T extends { title: string; description: string; link: string; sourceUrl: string; sourceTier?: SourceTier; sourceTags?: string[]; breakdown: ArticleScore; genericScore: number; projectAwareScore: number; pubDate: Date }
->(articles: T[], projects: ProjectConfig[]): Array<ProjectIntelligenceCandidate<T>> {
+>(articles: T[], projects: ProjectConfig[], recentHistory: DigestHistoryEntry[] = []): Array<ProjectIntelligenceCandidate<T>> {
   const selectedByArticle = new Map<T, ProjectMatch[]>();
 
   for (const project of projects) {
@@ -2404,11 +2479,14 @@ export function selectProjectIntelligenceCandidates<
         || b.article.genericScore - a.article.genericScore
         || b.article.pubDate.getTime() - a.article.pubDate.getTime()
       );
-    const selected = eventRepresentatives
-      .slice(0, project.selection.maxItems);
+    const fresh = eventRepresentatives.filter(({ article }) => !appearedInRecentDigest(article, recentHistory));
+    const coolingDown = eventRepresentatives.filter(({ article }) => appearedInRecentDigest(article, recentHistory));
+    const selectedFresh = fresh.slice(0, project.selection.maxItems);
+    const backfilled = coolingDown.slice(0, project.selection.maxItems - selectedFresh.length);
+    const selected = [...selectedFresh, ...backfilled];
 
     console.log(
-      `[digest] Project ${project.id} (${project.selection.preset}): matched=${modelMatches.length}, relevance>=${project.selection.minSectionRelevance}=${relevanceQualified.length}, quality>=${project.selection.minArticleQuality} and actionability>=${project.selection.minActionability}=${eligible.length}, uniqueEvents=${eventClusters.length}, duplicates=${eligible.length - eventClusters.length}, selected=${selected.length}`
+      `[digest] Project ${project.id} (${project.selection.preset}): matched=${modelMatches.length}, relevance>=${project.selection.minSectionRelevance}=${relevanceQualified.length}, quality>=${project.selection.minArticleQuality} and actionability>=${project.selection.minActionability}=${eligible.length}, uniqueEvents=${eventClusters.length}, duplicates=${eligible.length - eventClusters.length}, cooldownCandidates=${coolingDown.length}, backfilled=${backfilled.length}, selected=${selected.length}`
     );
 
     for (const { article, match } of selected) {
@@ -2481,12 +2559,13 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
   const hasProjectIntelligence = projects.length > 0 && projectArticles.length > 0;
+  const hasDesignIntelligence = designArticles.length > 0;
 
   let report = `# 📰 AI 资讯每日精选 — ${dateStr}\n\n`;
   report += `> 汇聚 ${stats.totalFeeds}+ 技术博客、X/Twitter、Hacker News、Reddit、Product Hunt、\n`;
   report += `> Lobste.rs、ClawFeed 日报及 GitHub Trending，经 AI 评分筛选。\n`;
   report += `>\n`;
-  report += `> **本期内容**：🏆 今日必读 · 🌐 ClawFeed 日报 · 🔥 GitHub Trending · 📂 分类精选 · 🎨 设计与生成式 AI · 📊 数据概览${hasProjectIntelligence ? ' · 🎯 项目相关情报' : ''}\n\n`;
+  report += `> **本期内容**：🏆 今日必读 · 🌐 ClawFeed 日报 · 🔥 GitHub Trending · 📂 分类精选${hasDesignIntelligence ? ' · 🎨 设计与生成式 AI' : ''} · 📊 数据概览${hasProjectIntelligence ? ' · 🎯 项目相关情报' : ''}\n\n`;
 
   // ── Today's Highlights ──
   if (highlights) {
@@ -2639,6 +2718,7 @@ Environment:
   AI_PRIMARY_PROVIDER Preferred provider: gemini, openai, or deepseek (default: gemini)
   AI_REQUEST_TIMEOUT_MS Per-request timeout in milliseconds (default: 180000)
   DEEPSEEK_THINKING_TASKS Comma-separated tasks: project-scoring,summary,highlights,design; all or none (default: project-scoring,highlights)
+  DESIGN_SECTION_ENABLED Enable the legacy Design & Generative AI section and its AI request (default: false)
   RSSHUB_BASE_URL  RSSHub instance URL for X/Twitter feeds (default: https://rsshub.app)
   X_ACCOUNTS       Comma-separated X/Twitter accounts to follow (e.g. karpathy,sama,ylecun)
   PROJECTS_CONFIG_PATH Optional project profile JSON path (default: config/projects.json)
@@ -2781,12 +2861,18 @@ async function main(): Promise<void> {
     console.log(`[digest] Project-matched articles: ${projectMatchedCount}/${scoredArticles.length}`);
   }
 
-  const recentDigestHistory = await loadRecentDigestHistory(outputPath);
+  const [recentDigestHistory, recentProjectDigestHistory] = await Promise.all([
+    loadRecentDigestHistory(outputPath),
+    loadRecentProjectDigestHistory(outputPath),
+  ]);
   if (recentDigestHistory.length > 0) {
     console.log(`[digest] Recent digest cooldown: ${recentDigestHistory.length} Top N article(s) loaded from the last ${DIGEST_COOLDOWN_HOURS}h`);
   }
+  if (recentProjectDigestHistory.length > 0) {
+    console.log(`[digest] Recent project cooldown: ${recentProjectDigestHistory.length} project article(s) loaded from the last ${DIGEST_COOLDOWN_HOURS}h`);
+  }
   const topArticles = rankArticles(scoredArticles, topN, recentDigestHistory);
-  const projectCandidates = selectProjectIntelligenceCandidates(scoredArticles, projects);
+  const projectCandidates = selectProjectIntelligenceCandidates(scoredArticles, projects, recentProjectDigestHistory);
   
   console.log(`[digest] Top ${topN} articles selected (score range: ${topArticles[topArticles.length - 1]?.projectAwareScore || 0} - ${topArticles[0]?.projectAwareScore || 0})`);
   
@@ -2843,21 +2929,25 @@ async function main(): Promise<void> {
   console.log(`[digest] Step 5/5: Generating today's highlights...`);
   const highlights = await generateHighlights(finalArticles, aiClient, lang);
 
-  // ── Design & Generative AI candidates ──
-  const seenDesignTitles = new Set<string>();
-  const designCandidates = [...scoredArticles]
-    .sort(compareGenericRank)
-    .filter(a => matchesDesignKeywords({ title: a.title, keywords: a.breakdown.keywords }))
-    .filter(a => {
-      const key = a.title.toLowerCase().trim();
-      if (seenDesignTitles.has(key)) return false;
-      seenDesignTitles.add(key);
-      return true;
-    })
-    .slice(0, MAX_DESIGN_CANDIDATES)
-    .map((a, i) => ({ index: i, title: a.title, link: a.link, pubDate: a.pubDate, description: a.description, sourceName: a.sourceName, keywords: a.breakdown.keywords }));
-  console.log(`[digest] Design & Generative AI candidates: ${designCandidates.length} keyword-matched articles`);
-  const designArticles = await categorizeDesignArticles(designCandidates, aiClient, lang);
+  let designArticles: DesignArticle[] = [];
+  if (DESIGN_SECTION_ENABLED) {
+    const seenDesignTitles = new Set<string>();
+    const designCandidates = [...scoredArticles]
+      .sort(compareGenericRank)
+      .filter(a => matchesDesignKeywords({ title: a.title, keywords: a.breakdown.keywords }))
+      .filter(a => {
+        const key = a.title.toLowerCase().trim();
+        if (seenDesignTitles.has(key)) return false;
+        seenDesignTitles.add(key);
+        return true;
+      })
+      .slice(0, MAX_DESIGN_CANDIDATES)
+      .map((a, i) => ({ index: i, title: a.title, link: a.link, pubDate: a.pubDate, description: a.description, sourceName: a.sourceName, keywords: a.breakdown.keywords }));
+    console.log(`[digest] Design & Generative AI candidates: ${designCandidates.length} keyword-matched articles`);
+    designArticles = await categorizeDesignArticles(designCandidates, aiClient, lang);
+  } else {
+    console.log('[digest] Design & Generative AI section: disabled');
+  }
 
   const successfulSources = new Set(allArticles.map(a => a.sourceName));
 

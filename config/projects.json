@@ -335,7 +335,7 @@
     {
       "id": "ocr-product",
       "name": "商品包装 OCR",
-      "goal": "跟踪包装文字识别、字段抽取、品牌匹配、商品知识库和多模态结构化提取",
+      "goal": "跟踪商品包装和复杂图片中的文字识别、多模态文档理解、版面与阅读顺序分析、字段与表格抽取、品牌匹配、商品知识库和结构化提取",
       "requiredSignals": [
         "OCR",
         "optical character recognition",
@@ -344,7 +344,12 @@
         "document understanding",
         "document parsing",
         "key information extraction",
-        "visual text extraction"
+        "visual text extraction",
+        "multimodal document understanding",
+        "document layout analysis",
+        "layout-aware OCR",
+        "document structure recognition",
+        "structured information extraction"
       ],
       "supportingSignals": [
         "packaging",
@@ -354,7 +359,13 @@
         "brand matching",
         "entity resolution",
         "product catalog matching",
-        "VLM OCR"
+        "VLM OCR",
+        "reading order detection",
+        "key-value extraction",
+        "table structure recognition",
+        "form understanding",
+        "schema-guided extraction",
+        "document VLM"
       ],
       "negativeSignals": [
         "license plate recognition",
@@ -372,6 +383,16 @@
         "key information extraction",
         "document parsing",
         "visual document understanding",
+        "multimodal document understanding",
+        "document layout analysis",
+        "layout-aware OCR",
+        "document structure recognition",
+        "reading order detection",
+        "key-value extraction",
+        "table structure recognition",
+        "form understanding",
+        "schema-guided extraction",
+        "structured information extraction",
         "structured extraction",
         "entity resolution",
         "product catalog matching",
@@ -381,7 +402,11 @@
       ],
       "entities": [
         "PaddleOCR",
+        "PaddleOCR-VL",
         "Qwen VL",
+        "DeepSeek-OCR",
+        "MinerU",
+        "Docling",
         "Google Document AI",
         "Azure Document Intelligence"
       ],
