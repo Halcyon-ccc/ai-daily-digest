@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   satisfiesRequiredSignalGroups,
   buildOpenAIRequestBody,
+  createAIClient,
   scoreArticlesWithAI,
   selectProjectIntelligenceCandidates,
   extractProjectDigestHistory,
@@ -30,6 +31,38 @@ describe('DeepSeek request modes', () => {
     expect(project.response_format).toEqual({ type: 'json_object' });
     expect(project.thinking).toEqual({ type: 'enabled' });
     expect(project.reasoning_effort).toBe('high');
+  });
+
+  test('keeps a sole provider eligible after a transient request failure', async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      if (calls === 1) throw new Error('temporary provider failure');
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: '{"results":[]}' } }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const client = createAIClient({
+        openaiApiKey: 'test-key',
+        openaiApiBase: 'https://api.example.com/v1',
+        openaiModel: 'test-model',
+        deepseekThinkingTasks: new Set(),
+        primaryProvider: 'openai',
+        requestTimeoutMs: 1_000,
+      });
+
+      await expect(client.call('first', 'scoring')).rejects.toThrow('temporary provider failure');
+      await expect(client.call('second', 'scoring')).resolves.toBe('{"results":[]}');
+      expect(calls).toBe(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
