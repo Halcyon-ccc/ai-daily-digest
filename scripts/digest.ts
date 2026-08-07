@@ -26,6 +26,7 @@ const MAX_PROJECT_TEXT_LENGTH = 240;
 const DIGEST_COOLDOWN_HOURS = 48;
 const FIRST_PARTY_RANKING_BONUS = 2;
 const MAX_LOW_INFORMATION_PENALTY = 3;
+const SECONDARY_SOURCE_TOP_LIMIT = 2;
 const AGGREGATOR_HOSTS = new Set([
   'news.ycombinator.com',
   'reddit.com',
@@ -149,7 +150,7 @@ const RSS_FEEDS: FeedSource[] = [
   // ── Design & Generative AI Blogs ──
   { name: "Hugging Face Blog", xmlUrl: "https://huggingface.co/blog/feed.xml", htmlUrl: "https://huggingface.co/blog" },
   { name: "Lilian Weng", xmlUrl: "https://lilianweng.github.io/index.xml", htmlUrl: "https://lilianweng.github.io" },
-  { name: "The Decoder", xmlUrl: "https://the-decoder.com/feed/", htmlUrl: "https://the-decoder.com" },
+  { name: "The Decoder", xmlUrl: "https://the-decoder.com/feed/", htmlUrl: "https://the-decoder.com", tier: "secondary" },
   { name: "Replicate Blog", xmlUrl: "https://replicate.com/blog/rss", htmlUrl: "https://replicate.com/blog" },
   { name: "NVIDIA Technical Blog", xmlUrl: "https://developer.nvidia.com/blog/feed/", htmlUrl: "https://developer.nvidia.com/blog" },
   { name: "Stability AI Blog", xmlUrl: "https://stability.ai/blog/feed", htmlUrl: "https://stability.ai/blog" },
@@ -200,7 +201,8 @@ const CATEGORY_META: Record<CategoryId, { emoji: string; label: string }> = {
   'other':       { emoji: '📝', label: '其他' },
 };
 
-type SourceTier = 'first-party' | 'research' | 'community' | 'aggregator';
+type SourceTier = 'first-party' | 'research' | 'secondary' | 'community' | 'aggregator';
+type VerificationStatus = 'first-party' | 'traceable-secondary' | 'unverified';
 type ProjectSelectionPreset = 'strict' | 'balanced' | 'broad';
 
 interface FeedSource {
@@ -237,6 +239,7 @@ interface ScoredArticle extends Article {
   titleZh: string;
   summary: string;
   reason: string;
+  projectCooldownIds?: string[];
 }
 
 interface ProjectConfig {
@@ -1155,7 +1158,7 @@ const PROJECT_SELECTION_PRESETS: Record<ProjectSelectionPreset, ProjectSelection
   },
 };
 
-const SOURCE_TIERS = new Set<SourceTier>(['first-party', 'research', 'community', 'aggregator']);
+const SOURCE_TIERS = new Set<SourceTier>(['first-party', 'research', 'secondary', 'community', 'aggregator']);
 
 function normalizeBoundedInteger(value: unknown, fallback: number, min: number, max: number): number {
   const numeric = typeof value === 'number' ? value : Number(value);
@@ -1560,6 +1563,7 @@ type IndexedScoringArticle = {
   title: string;
   description: string;
   sourceName: string;
+  possibleProjectIds?: string[];
 };
 
 async function scoreArticlePass(
@@ -1580,14 +1584,17 @@ async function scoreArticlePass(
   console.log(`[digest] ${label}: ${indexed.length} articles in ${batches.length} batches`);
   
   const validCategories = new Set<string>(['ai-ml', 'security', 'engineering', 'tools', 'opinion', 'other']);
-  const projectsById = new Map(projects.map(project => [project.id, project]));
-  
   for (let i = 0; i < batches.length; i += MAX_CONCURRENT_GEMINI) {
     const batchGroup = batches.slice(i, i + MAX_CONCURRENT_GEMINI);
     const promises = batchGroup.map(async (batch) => {
-      const prompt = buildScoringPrompt(batch, projects);
+      const possibleProjectIds = new Set(batch.flatMap(item => item.possibleProjectIds || []));
+      const promptProjects = task === 'project-scoring'
+        ? projects.filter(project => possibleProjectIds.has(project.id))
+        : projects;
+      const prompt = buildScoringPrompt(batch, promptProjects);
       const batchIndices = batch.map(item => item.index);
       const allowedIndices = new Set(batchIndices);
+      const projectsById = new Map(promptProjects.map(project => [project.id, project]));
       let bestScores = new Map<number, ArticleScore>();
       let lastError: unknown;
 
@@ -1689,10 +1696,14 @@ export async function scoreArticlesWithAI(
   );
   if (projects.length === 0) return genericScores;
 
-  const projectCandidates = indexed.filter(item =>
-    projects.some(project => articleMightMatchProject(articles[item.index]!, project))
-  );
-  console.log(`[digest] Project scoring candidates: ${projectCandidates.length}/${articles.length}`);
+  const projectCandidates = indexed.flatMap(item => {
+    const possibleProjectIds = projects
+      .filter(project => articleMightMatchProject(articles[item.index]!, project))
+      .map(project => project.id);
+    return possibleProjectIds.length > 0 ? [{ ...item, possibleProjectIds }] : [];
+  });
+  const referencedProjectIds = new Set(projectCandidates.flatMap(item => item.possibleProjectIds));
+  console.log(`[digest] Project scoring candidates: ${projectCandidates.length}/${articles.length}; relevant profiles=${referencedProjectIds.size}/${projects.length}`);
   if (projectCandidates.length === 0) return genericScores;
 
   const projectScores = await scoreArticlePass(
@@ -2055,7 +2066,32 @@ function getProjectAwareScore(score: ArticleScore): number {
   return score.quality + score.timeliness + bestMatch.projectRelevance * 2 + bestMatch.actionability;
 }
 
-function getLowInformationPenalty(article: { title: string; description: string }): number {
+const UNCERTAINTY_SIGNAL_REGEX = /\b(?:rumou?red?|reportedly|allegedly|unconfirmed|speculation|unclear|possibly|might|could)\b|据报道|据传|传闻|疑似|可能|或许|尚未证实|未经证实|据称|似乎|不确定/i;
+const TRACEABLE_ATTRIBUTION_REGEX = /\b(?:according to|reported by|citing|cites|based on (?:data|a report|research)|analysis (?:by|from)|data (?:from|by)|study (?:by|from)|research (?:by|from))\b|(?:据|根据|援引|引用).{0,40}(?:报道|报告|分析|数据|研究|论文|公告)|\b(?:Bloomberg|Reuters|Financial Times|Associated Press|Artificial Analysis)\b/i;
+const WEAK_EVIDENCE_REGEX = /\b(?:eyewitness|attendee notes?|social media posts?|anonymous sources?)\b|现场纪要|听会纪要|社交媒体|匿名消息|未核到官方|尚无官方/i;
+
+export function assessVerificationStatus(article: { title: string; description: string; sourceTier?: SourceTier }): VerificationStatus | undefined {
+  if (article.sourceTier === 'first-party' || article.sourceTier === 'research') return 'first-party';
+
+  const text = `${article.title} ${article.description}`;
+  const uncertain = UNCERTAINTY_SIGNAL_REGEX.test(text);
+  const traceable = TRACEABLE_ATTRIBUTION_REGEX.test(text);
+  const weakEvidence = WEAK_EVIDENCE_REGEX.test(text);
+
+  if (uncertain && (weakEvidence || !traceable)) return 'unverified';
+  if ((article.sourceTier === 'secondary' || uncertain) && traceable) return 'traceable-secondary';
+  return undefined;
+}
+
+function getVerificationLabel(article: { title: string; description: string; sourceTier?: SourceTier }): string {
+  const status = assessVerificationStatus(article);
+  if (status === 'first-party') return '一手来源';
+  if (status === 'traceable-secondary') return '可追溯二手';
+  if (status === 'unverified') return '待核实';
+  return '';
+}
+
+function getLowInformationPenalty(article: { title: string; description: string; sourceTier?: SourceTier }): number {
   const title = stripHtml(article.title).replace(/\s+/g, ' ').trim();
   const description = stripHtml(article.description).replace(/\s+/g, ' ').trim();
   const normalizedTitle = normalizeSignalText(title).trim();
@@ -2072,9 +2108,9 @@ function getLowInformationPenalty(article: { title: string; description: string 
     penalty += 1;
   }
 
-  if (/\b(?:rumou?red?|reportedly|allegedly|unconfirmed|speculation|unclear|possibly|may|might|could)\b|据传|传闻|疑似|可能|或许|尚未证实|未经证实|据称|似乎|不确定/i.test(description)) {
-    penalty += 1;
-  }
+  const verificationStatus = assessVerificationStatus(article);
+  if (verificationStatus === 'unverified') penalty += 2;
+  else if (verificationStatus === 'traceable-secondary' && UNCERTAINTY_SIGNAL_REGEX.test(`${title} ${description}`)) penalty += 1;
 
   return Math.min(MAX_LOW_INFORMATION_PENALTY, penalty);
 }
@@ -2211,14 +2247,22 @@ function appearedInRecentDigest(article: RankableArticle, history: DigestHistory
 
 function applySourceTopLimits<T extends RankableArticle>(articles: T[], topN: number): T[] {
   const selected: T[] = [];
+  const deferred: T[] = [];
   const sourceCounts = new Map<string, number>();
   for (const article of articles) {
     const count = sourceCounts.get(article.sourceName) || 0;
     if (article.sourceMaxTopItems !== undefined && count >= article.sourceMaxTopItems) continue;
+    if (article.sourceMaxTopItems === undefined
+      && article.sourceTier === 'secondary'
+      && count >= SECONDARY_SOURCE_TOP_LIMIT) {
+      deferred.push(article);
+      continue;
+    }
     selected.push(article);
     sourceCounts.set(article.sourceName, count + 1);
     if (selected.length >= topN) break;
   }
+  if (selected.length < topN) selected.push(...deferred.slice(0, topN - selected.length));
   return selected.length > 0 ? selected : articles.slice(0, Math.min(1, topN));
 }
 
@@ -2229,11 +2273,13 @@ export function rankArticles<T extends RankableArticle>(
 ): T[] {
   const uniqueArticles = deduplicateRankedEvents(articles);
   const sourceLimitedNames = new Set(uniqueArticles
-    .filter(article => article.sourceMaxTopItems !== undefined)
+    .filter(article => article.sourceMaxTopItems !== undefined || article.sourceTier === 'secondary')
     .map(article => article.sourceName)
     .filter(sourceName => {
       const sourceArticles = uniqueArticles.filter(article => article.sourceName === sourceName);
-      return sourceArticles.length > (sourceArticles[0]?.sourceMaxTopItems || Infinity);
+      const sourceLimit = sourceArticles[0]?.sourceMaxTopItems
+        ?? (sourceArticles[0]?.sourceTier === 'secondary' ? SECONDARY_SOURCE_TOP_LIMIT : Infinity);
+      return sourceArticles.length > sourceLimit;
     }));
   const matched = uniqueArticles.filter(article => article.breakdown.projectMatches.length > 0);
   let ordered: T[];
@@ -2258,10 +2304,13 @@ export function rankArticles<T extends RankableArticle>(
   const coolingDown = ordered.filter(article => appearedInRecentDigest(article, recentHistory));
   const firstPartyBoosted = uniqueArticles.filter(article => article.sourceTier === 'first-party').length;
   const lowInformationPenalized = uniqueArticles.filter(article => getLowInformationPenalty(article) > 0).length;
+  const traceableSecondary = uniqueArticles.filter(article => assessVerificationStatus(article) === 'traceable-secondary').length;
+  const unverified = uniqueArticles.filter(article => assessVerificationStatus(article) === 'unverified').length;
   console.log(
     `[digest] Top ranking controls: uniqueEvents=${uniqueArticles.length}/${articles.length}, `
     + `duplicates=${articles.length - uniqueArticles.length}, cooldownCandidates=${coolingDown.length}, `
     + `firstPartyBoosted=${firstPartyBoosted}, lowInformationPenalized=${lowInformationPenalized}, `
+    + `traceableSecondary=${traceableSecondary}, unverified=${unverified}, `
     + `sourceCaps=${[...sourceLimitedNames].join(', ') || 'none'}`
   );
   const selected = applySourceTopLimits(fresh, topN);
@@ -2338,6 +2387,7 @@ export async function loadRecentProjectDigestHistory(outputPath: string, now = n
 interface ProjectIntelligenceCandidate<T> {
   article: T;
   matches: ProjectMatch[];
+  cooldownProjectIds: string[];
 }
 
 interface ProjectEventCandidate<T> {
@@ -2441,7 +2491,7 @@ function compareProjectEventCandidates<
 export function selectProjectIntelligenceCandidates<
   T extends { title: string; description: string; link: string; sourceUrl: string; sourceTier?: SourceTier; sourceTags?: string[]; breakdown: ArticleScore; genericScore: number; projectAwareScore: number; pubDate: Date }
 >(articles: T[], projects: ProjectConfig[], recentHistory: DigestHistoryEntry[] = []): Array<ProjectIntelligenceCandidate<T>> {
-  const selectedByArticle = new Map<T, ProjectMatch[]>();
+  const selectedByArticle = new Map<T, { matches: ProjectMatch[]; cooldownProjectIds: string[] }>();
 
   for (const project of projects) {
     const modelMatches = articles.flatMap(article => {
@@ -2484,25 +2534,28 @@ export function selectProjectIntelligenceCandidates<
     const selectedFresh = fresh.slice(0, project.selection.maxItems);
     const backfilled = coolingDown.slice(0, project.selection.maxItems - selectedFresh.length);
     const selected = [...selectedFresh, ...backfilled];
+    const backfilledArticles = new Set(backfilled.map(({ article }) => article));
 
     console.log(
       `[digest] Project ${project.id} (${project.selection.preset}): matched=${modelMatches.length}, relevance>=${project.selection.minSectionRelevance}=${relevanceQualified.length}, quality>=${project.selection.minArticleQuality} and actionability>=${project.selection.minActionability}=${eligible.length}, uniqueEvents=${eventClusters.length}, duplicates=${eligible.length - eventClusters.length}, cooldownCandidates=${coolingDown.length}, backfilled=${backfilled.length}, selected=${selected.length}`
     );
 
     for (const { article, match } of selected) {
-      const matches = selectedByArticle.get(article) || [];
-      matches.push(match);
-      selectedByArticle.set(article, matches);
+      const selection = selectedByArticle.get(article) || { matches: [], cooldownProjectIds: [] };
+      selection.matches.push(match);
+      if (backfilledArticles.has(article)) selection.cooldownProjectIds.push(project.id);
+      selectedByArticle.set(article, selection);
     }
   }
 
-  return Array.from(selectedByArticle, ([article, matches]) => ({ article, matches }));
+  return Array.from(selectedByArticle, ([article, selection]) => ({ article, ...selection }));
 }
 
-function renderProjectIntelligenceSection(articles: ScoredArticle[], projects: ProjectConfig[]): string {
+function renderProjectIntelligenceSection(articles: ScoredArticle[], projects: ProjectConfig[], topArticles: ScoredArticle[]): string {
   if (projects.length === 0) return '';
 
   const projectById = new Map(projects.map(project => [project.id, project]));
+  const topArticleUrls = new Set(topArticles.map(article => normalizeArticleUrl(article.link)));
   const grouped = new Map<string, Array<{ article: ScoredArticle; match: ProjectMatch }>>();
 
   for (const article of articles) {
@@ -2530,13 +2583,22 @@ function renderProjectIntelligenceSection(articles: ScoredArticle[], projects: P
 
     section += `### ${project.name}\n\n`;
     for (const { article, match } of items) {
+      const includedInTop = topArticleUrls.has(normalizeArticleUrl(article.link));
+      const isCooldownBackfill = article.projectCooldownIds?.includes(match.projectId) || false;
+      const statusLabels = [
+        includedInTop ? `本期 Top ${topArticles.length} 已收录` : '',
+        isCooldownBackfill ? '48h 回填' : '',
+      ].filter(Boolean);
+      const verificationLabel = getVerificationLabel(article);
+
       section += `#### [${article.titleZh || article.title}](${article.link})\n\n`;
-      section += `${article.summary}\n\n`;
+      if (statusLabels.length > 0) section += `> **状态**：${statusLabels.join(' · ')}\n\n`;
+      if (!includedInTop) section += `${article.summary}\n\n`;
       section += `- **项目相关性**：${match.projectRelevance}/10\n`;
       section += `- **可落地性**：${match.actionability}/10\n`;
       section += `- **为什么相关**：${match.whyRelevant || '模型未提供具体说明。'}\n`;
       section += `- **建议动作**：${match.recommendedAction || '加入后续人工评估清单。'}\n`;
-      section += `- **来源**：${article.sourceName}\n\n`;
+      section += `- **来源**：${article.sourceName}${verificationLabel ? ` · ${verificationLabel}` : ''}\n\n`;
     }
   }
 
@@ -2581,9 +2643,10 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
       const a = articles[i];
       const medal = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'][i];
       const catMeta = CATEGORY_META[a.category];
+      const verificationLabel = getVerificationLabel(a);
 
       report += `${medal} **${a.titleZh || a.title}**\n\n`;
-      report += `[${a.title}](${a.link}) — ${a.sourceName} · ${humanizeTime(a.pubDate)} · ${catMeta.emoji} ${catMeta.label}\n\n`;
+      report += `[${a.title}](${a.link}) — ${a.sourceName} · ${humanizeTime(a.pubDate)} · ${catMeta.emoji} ${catMeta.label}${verificationLabel ? ` · **${verificationLabel}**` : ''}\n\n`;
       report += `> ${a.summary}\n\n`;
       if (a.reason) {
         report += `💡 **为什么值得读**: ${a.reason}\n\n`;
@@ -2642,9 +2705,10 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
     for (const a of catArticles) {
       globalIndex++;
       const scoreTotal = a.scoreBreakdown.relevance + a.scoreBreakdown.quality + a.scoreBreakdown.timeliness;
+      const verificationLabel = getVerificationLabel(a);
 
       report += `### ${globalIndex}. ${a.titleZh || a.title}\n\n`;
-      report += `[${a.title}](${a.link}) — **${a.sourceName}** · ${humanizeTime(a.pubDate)} · ⭐ ${scoreTotal}/30\n\n`;
+      report += `[${a.title}](${a.link}) — **${a.sourceName}** · ${humanizeTime(a.pubDate)} · ⭐ ${scoreTotal}/30${verificationLabel ? ` · **${verificationLabel}**` : ''}\n\n`;
       report += `> ${a.summary}\n\n`;
       if (a.keywords.length > 0) {
         report += `🏷️ ${a.keywords.join(', ')}\n\n`;
@@ -2685,7 +2749,7 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
 
   report += `---\n\n`;
 
-  report += renderProjectIntelligenceSection(projectArticles, projects);
+  report += renderProjectIntelligenceSection(projectArticles, projects, articles);
 
   // ── Footer ──
   report += `*生成于 ${dateStr} ${now.toISOString().split('T')[1]?.slice(0, 5) || ''} | 汇聚 ${stats.totalFeeds} 个技术博客、X/Twitter、Hacker News、Reddit、Product Hunt、Lobste.rs、ClawFeed 日报及 GitHub Trending，经 AI 评分筛选出 Top ${articles.length} 精华内容*\n`;
@@ -2893,7 +2957,8 @@ async function main(): Promise<void> {
 
   const toScoredArticle = (
     article: (typeof scoredArticles)[number],
-    projectMatches: ProjectMatch[]
+    projectMatches: ProjectMatch[],
+    projectCooldownIds: string[] = []
   ): ScoredArticle => {
     const summaryIndex = summaryIndexByArticle.get(article);
     const sm = summaryIndex === undefined
@@ -2920,11 +2985,14 @@ async function main(): Promise<void> {
       titleZh: sm.titleZh,
       summary: sm.summary,
       reason: sm.reason,
+      projectCooldownIds,
     };
   };
 
   const finalArticles = topArticles.map(article => toScoredArticle(article, article.breakdown.projectMatches));
-  const projectIntelligenceArticles = projectCandidates.map(({ article, matches }) => toScoredArticle(article, matches));
+  const projectIntelligenceArticles = projectCandidates.map(({ article, matches, cooldownProjectIds }) =>
+    toScoredArticle(article, matches, cooldownProjectIds)
+  );
   
   console.log(`[digest] Step 5/5: Generating today's highlights...`);
   const highlights = await generateHighlights(finalArticles, aiClient, lang);
