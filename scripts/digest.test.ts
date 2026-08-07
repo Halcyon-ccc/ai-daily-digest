@@ -6,10 +6,13 @@ import {
   buildOpenAIRequestBody,
   scoreArticlesWithAI,
   selectProjectIntelligenceCandidates,
+  extractProjectDigestHistory,
   loadConfiguredSources,
   extractTopDigestHistory,
+  getGenericRankingAdjustment,
   isSameDigestEvent,
   loadRecentDigestHistory,
+  loadRecentProjectDigestHistory,
   rankArticles,
   summarizeArticles,
   validateProjectsConfig,
@@ -171,6 +174,41 @@ describe('global digest ranking', () => {
       await writeFile(outputPath, '## 🤖 AI / ML\n\n### 1. 已有文章\n\n[Existing article](https://example.com/existing) — **Source**\n');
       const history = await loadRecentDigestHistory(outputPath, new Date('2026-08-06T08:00:00Z'));
       expect(history).toEqual([{ title: 'Existing article', link: 'https://example.com/existing' }]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('boosts first-party sources and penalizes low-information uncertain descriptions', () => {
+    const detailed = 'The release notes document benchmark results, implementation details, compatibility changes, migration steps, and links to the complete technical specification.';
+    expect(getGenericRankingAdjustment({ title: 'Official release', description: detailed, sourceTier: 'first-party' })).toBe(2);
+    expect(getGenericRankingAdjustment({ title: 'Rumor', description: 'Reportedly this may happen.', sourceTier: 'community' })).toBe(-3);
+    expect(getGenericRankingAdjustment({ title: 'Brief update', description: 'Technical update with benchmark numbers, deployment details, and a link to the full report.' })).toBe(-1);
+
+    const community = { ...makeArticle('Community analysis', 'https://community.example/analysis', 'Community', 25), description: detailed, sourceTier: 'community' as const };
+    const official = { ...makeArticle('Official technical release', 'https://official.example/release', 'Official', 24), description: detailed, sourceTier: 'first-party' as const };
+    expect(rankArticles([community, official], 1)[0]?.sourceName).toBe('Official');
+  });
+});
+
+describe('project digest cooldown', () => {
+  test('extracts project articles independently from generic sections', () => {
+    const markdown = `## 🏆 今日必读\n\n[Generic item](https://example.com/generic) — Source\n\n---\n\n## 🎯 项目相关情报\n\n### ASR\n\n#### [Project item](https://example.com/project)\n\n摘要\n\n---`;
+    expect(extractProjectDigestHistory(markdown)).toEqual([
+      { title: 'Project item', link: 'https://example.com/project' },
+    ]);
+    expect(extractTopDigestHistory(markdown)).toEqual([
+      { title: 'Generic item', link: 'https://example.com/generic' },
+    ]);
+  });
+
+  test('loads project articles from an existing same-day report', async () => {
+    const directory = await mkdtemp('/tmp/project-digest-history-');
+    const outputPath = join(directory, 'digest-20260806.md');
+    try {
+      await writeFile(outputPath, '## 🎯 项目相关情报\n\n### ASR\n\n#### [Existing project item](https://example.com/project)\n\n摘要\n\n---\n');
+      const history = await loadRecentProjectDigestHistory(outputPath, new Date('2026-08-06T08:00:00Z'));
+      expect(history).toEqual([{ title: 'Existing project item', link: 'https://example.com/project' }]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -463,5 +501,59 @@ describe('per-project selection', () => {
       makeArticle('Decentralized multimodal semantic navigation', 'https://arxiv.org/2'),
     ], [project!]);
     expect(selected).toHaveLength(2);
+  });
+
+  test('prefers fresh project articles and backfills cooling-down items when needed', () => {
+    const [project] = validateProjectsConfig({
+      projects: [{
+        id: 'asr',
+        name: 'ASR',
+        goal: 'Track speech recognition',
+        keywords: ['ASR'],
+        selection: { preset: 'balanced', maxItems: 2 },
+      }],
+    });
+    const makeArticle = (title: string, link: string, relevance: number) => ({
+      title,
+      description: `${title} with detailed benchmark results and implementation guidance for production speech recognition systems.`,
+      link,
+      pubDate: new Date(),
+      sourceName: 'Research',
+      sourceUrl: 'https://research.example',
+      sourceTier: 'research' as const,
+      genericScore: 24,
+      projectAwareScore: 40,
+      breakdown: {
+        relevance: 8,
+        quality: 8,
+        timeliness: 8,
+        category: 'ai-ml' as const,
+        keywords: ['ASR'],
+        projectMatches: [{
+          projectId: 'asr',
+          projectRelevance: relevance,
+          actionability: 8,
+          whyRelevant: 'ASR benchmark',
+          recommendedAction: 'Evaluate',
+        }],
+      },
+    });
+    const cooledHigh = makeArticle('High-ranked repeated ASR benchmark', 'https://example.com/cooled-high', 10);
+    const fresh = makeArticle('Fresh ASR latency benchmark', 'https://example.com/fresh', 8);
+    const cooledLow = makeArticle('Older repeated ASR benchmark', 'https://example.com/cooled-low', 7);
+
+    const selected = selectProjectIntelligenceCandidates(
+      [cooledHigh, fresh, cooledLow],
+      [project!],
+      [
+        { title: cooledHigh.title, link: cooledHigh.link },
+        { title: cooledLow.title, link: cooledLow.link },
+      ]
+    );
+
+    expect(selected.map(item => item.article.link)).toEqual([
+      fresh.link,
+      cooledHigh.link,
+    ]);
   });
 });
