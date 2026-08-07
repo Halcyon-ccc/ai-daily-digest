@@ -1029,7 +1029,7 @@ function resolveAIProviderOrder(
     .filter((provider): provider is AIProvider => available.has(provider));
 }
 
-function createAIClient(config: {
+export function createAIClient(config: {
   geminiApiKey?: string;
   openaiApiKey?: string;
   openaiApiBase?: string;
@@ -1079,10 +1079,10 @@ function createAIClient(config: {
       try {
         return await callProvider(provider, prompt, task);
       } catch (error) {
-        state.failedProviders.add(provider);
-        const fallback = state.providers.find(item => !state.failedProviders.has(item));
+        const fallback = state.providers.find(item => item !== provider && !state.failedProviders.has(item));
         if (!fallback) throw error;
 
+        state.failedProviders.add(provider);
         if (!state.fallbackLogged) {
           const reason = error instanceof Error ? error.message : String(error);
           console.warn(`[digest] ${provider} failed, switching to ${fallback} fallback. Reason: ${reason}`);
