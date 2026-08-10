@@ -5,6 +5,12 @@ on:
     # UTC 00:10 = 北京时间 08:10
     - cron: '10 0 * * *'
   workflow_dispatch:
+    inputs:
+      ignore_same_day_cooldown:
+        description: Regenerate the full daily ranking instead of rotating same-day articles
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   generate-digest:
@@ -50,6 +56,7 @@ jobs:
           AI_PRIMARY_PROVIDER: openai
           AI_REQUEST_TIMEOUT_MS: 180000
           DEEPSEEK_THINKING_TASKS: project-scoring,highlights
+          DIGEST_IGNORE_SAME_DAY_COOLDOWN: ${{ github.event_name == 'workflow_dispatch' && inputs.ignore_same_day_cooldown }}
           RSSHUB_BASE_URL: http://localhost:1200
           X_ACCOUNTS: ${{ vars.X_ACCOUNTS || 'grok,xingpt,FinanceYF5,sodawhite_dev,yetone,runes_leo,abskoop,egeberkina,vasuman,eptwts,EXM7777,steipete,rileybrown,yangyi,manateelazycat,lifesinger,yuxiyou,gregisenberg,oran_ge,LangChain,OpenAI,AnthropicAI,Khazix0918,dotey,deepseek_ai,_akhaliq,DrJimFan,hardmaru,LumaLabsAI,huggingface' }}
         run: |
