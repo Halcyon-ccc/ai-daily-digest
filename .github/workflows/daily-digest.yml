@@ -88,7 +88,7 @@ jobs:
             exit 0
           fi
 
-          # Extract highlights and top 5 articles for WeChat message
+          # Keep the existing generic excerpt, then append a compact project status.
           TITLE="📰 AI 每日精选 $(TZ=Asia/Shanghai date +%Y-%m-%d)"
           DESP=$(awk '
             /^## 📝 今日看点/{found=1; next}
@@ -96,6 +96,22 @@ jobs:
             /^## 📊 数据概览/{exit}
             found{print}
           ' "$DIGEST_FILE" | head -80)
+
+          PROJECT_SUMMARY=$(awk '
+            /^## 🎯 项目相关情报/{projects=1; next}
+            projects && /^---$/{exit}
+            projects && /^### /{print; next}
+            projects && /^#### /{sub(/^#### /, "- "); print; next}
+            projects && /^> 暂无达到质量门槛的项目相关情报。/{print; next}
+          ' "$DIGEST_FILE")
+
+          if [ -n "$PROJECT_SUMMARY" ]; then
+            DESP="${DESP}
+
+          ## 🎯 项目相关情报
+
+          ${PROJECT_SUMMARY}"
+          fi
 
           DESP="${DESP}
 
@@ -131,6 +147,22 @@ jobs:
             /^## 📊 数据概览/{exit}
             found{print}
           ' "$DIGEST_FILE" | head -60)
+
+          PROJECT_SUMMARY=$(awk '
+            /^## 🎯 项目相关情报/{projects=1; next}
+            projects && /^---$/{exit}
+            projects && /^### /{print; next}
+            projects && /^#### /{sub(/^#### /, "- "); print; next}
+            projects && /^> 暂无达到质量门槛的项目相关情报。/{print; next}
+          ' "$DIGEST_FILE")
+
+          if [ -n "$PROJECT_SUMMARY" ]; then
+            SUMMARY="${SUMMARY}
+
+          ## 🎯 项目相关情报
+
+          ${PROJECT_SUMMARY}"
+          fi
 
           DIGEST_URL="https://github.com/${{ github.repository }}/blob/main/${DIGEST_FILE}"
 
