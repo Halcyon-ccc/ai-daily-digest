@@ -8,6 +8,7 @@ import {
   createAIClient,
   scoreArticlesWithAI,
   selectProjectIntelligenceCandidates,
+  selectSupplementalViewCandidates,
   extractProjectDigestHistory,
   loadConfiguredSources,
   extractTopDigestHistory,
@@ -16,6 +17,7 @@ import {
   loadRecentDigestHistory,
   loadRecentProjectDigestHistory,
   rankArticles,
+  renderSupplementalViewsSection,
   summarizeArticles,
   validateProjectsConfig,
   validateSourcesConfig,
@@ -72,8 +74,8 @@ const agentSecurityProject = {
   name: 'Agent security',
   goal: 'Track agent security controls',
   requiredSignalGroups: [
-    ['AI agent', 'MCP', 'tool calling'],
-    ['prompt injection', 'tool authorization', 'sandboxing', 'safety tests', 'social engineering'],
+    ['AI agent', 'MCP', 'tool calling', 'AgentCore', 'agent commands'],
+    ['prompt injection', 'tool authorization', 'access control', 'human approval', 'temporal policies', 'rate limiting', 'sandboxing', 'safety tests', 'social engineering'],
   ],
   requiredSignals: ['AI agent', 'MCP', 'tool calling'],
   supportingSignals: [],
@@ -180,11 +182,12 @@ describe('global digest ranking', () => {
     expect(ranked[2]?.link).toBe('https://speech.example/benchmark');
   });
 
-  test('extracts only articles from the Top N section', () => {
-    const markdown = `## 🏆 今日必读\n\n🥇 **标题**\n\n[Original title](https://example.com/a) — Source\n\n---\n\n## 🤖 AI / ML\n\n### 1. 标题\n\n[Original title](https://example.com/a) — **Source**\n\n### 2. 另一条\n\n[Another title](https://example.com/c) — **Source**\n\n## 🎯 项目相关情报\n\n[Project item](https://example.com/b) — Source`;
+  test('extracts Top N and supplemental articles but not project-only items', () => {
+    const markdown = `## 🏆 今日必读\n\n🥇 **标题**\n\n[Original title](https://example.com/a) — Source\n\n---\n\n## 🤖 AI / ML\n\n### 1. 标题\n\n[Original title](https://example.com/a) — **Source**\n\n### 2. 另一条\n\n[Another title](https://example.com/c) — **Source**\n\n## 🎯 项目相关情报\n\n[Project item](https://example.com/b) — Source\n\n## 🌍 补充视角\n\n### 1. 补充\n\n[Supplemental article](https://example.com/supplemental) — **Supplemental**`;
     expect(extractTopDigestHistory(markdown)).toEqual([
       { title: 'Original title', link: 'https://example.com/a' },
       { title: 'Another title', link: 'https://example.com/c' },
+      { title: 'Supplemental article', link: 'https://example.com/supplemental' },
     ]);
   });
 
@@ -223,6 +226,19 @@ describe('global digest ranking', () => {
     }
   });
 
+  test('can ignore the current output while preserving previous-day cooldown history', async () => {
+    const directory = await mkdtemp('/tmp/digest-history-');
+    const outputPath = join(directory, 'digest-20260806.md');
+    try {
+      await writeFile(outputPath, '## 🤖 AI / ML\n\n### 1. Current\n\n[Current article](https://example.com/current) — **Source**\n');
+      await writeFile(join(directory, 'digest-20260805.md'), '## 🤖 AI / ML\n\n### 1. Previous\n\n[Previous article](https://example.com/previous) — **Source**\n');
+      const history = await loadRecentDigestHistory(outputPath, new Date('2026-08-06T08:00:00Z'), true);
+      expect(history).toEqual([{ title: 'Previous article', link: 'https://example.com/previous' }]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test('boosts first-party sources and penalizes low-information uncertain descriptions', () => {
     const detailed = 'The release notes document benchmark results, implementation details, compatibility changes, migration steps, and links to the complete technical specification.';
     expect(getGenericRankingAdjustment({ title: 'Official release', description: detailed, sourceTier: 'first-party' })).toBe(2);
@@ -245,6 +261,11 @@ describe('global digest ranking', () => {
       description: 'According to Bloomberg analysis, the partner contributes most of the revenue.',
       sourceTier: 'secondary',
     })).toBe('traceable-secondary');
+    expect(assessVerificationStatus({
+      title: 'Vendor changes its free model tier',
+      description: 'A technology publication summarizes the newly announced product policy.',
+      sourceTier: 'secondary',
+    })).toBe('secondary');
     expect(assessVerificationStatus({
       title: 'Models reportedly coordinated attacks',
       description: 'The claim comes from attendee notes shared in a social media post.',
@@ -272,6 +293,64 @@ describe('global digest ranking', () => {
     const backfilled = rankArticles(secondary.slice(0, 3), 3);
     expect(backfilled).toHaveLength(3);
     expect(backfilled.every(article => article.sourceName === 'Secondary')).toBe(true);
+  });
+
+  test('selects up to three qualified supplemental views from sources absent from Top N', () => {
+    const top = makeArticle('Top source article', 'https://top.example/article', 'Top', 30);
+    const sameTopSource = makeArticle('Another strong article', 'https://top.example/another', 'Top', 29);
+    const sourceB = makeArticle('Independent systems benchmark', 'https://b.example/benchmark', 'Source B', 28);
+    const duplicateSourceB = makeArticle('Independent systems followup', 'https://b.example/followup', 'Source B', 27);
+    const sourceC = makeArticle('Database reliability study', 'https://c.example/study', 'Source C', 26);
+    const cooled = makeArticle('Compiler performance release', 'https://d.example/release', 'Source D', 25);
+    const projectOnly = makeArticle('Agent security implementation', 'https://e.example/security', 'Source E', 24);
+    const sourceF = makeArticle('Browser standards update', 'https://f.example/standards', 'Source F', 23);
+    const lowQuality = {
+      ...makeArticle('Thin vendor claim', 'https://g.example/claim', 'Source G', 24),
+      breakdown: {
+        ...makeArticle('Thin vendor claim', 'https://g.example/claim', 'Source G', 24).breakdown,
+        quality: 5,
+      },
+    };
+    const unverified = {
+      ...makeArticle('Reportedly coordinated attack', 'https://h.example/rumor', 'Source H', 24),
+      description: 'The claim comes from attendee notes shared in a social media post.',
+      sourceTier: 'secondary' as const,
+    };
+
+    const selected = selectSupplementalViewCandidates(
+      [top, sameTopSource, sourceB, duplicateSourceB, sourceC, cooled, projectOnly, sourceF, lowQuality, unverified],
+      [top],
+      [{ title: cooled.title, link: cooled.link }],
+      [top, projectOnly]
+    );
+
+    expect(selected.map(article => article.sourceName)).toEqual(['Source B', 'Source C', 'Source F']);
+    expect(new Set(selected.map(article => new URL(article.sourceUrl).hostname)).size).toBe(3);
+  });
+
+  test('renders supplemental views with the actual Top N count and source status', () => {
+    const markdown = renderSupplementalViewsSection([{
+      title: 'Original supplemental title',
+      titleZh: '补充文章',
+      description: 'A detailed secondary report.',
+      summary: '这是一个来自不同来源的高质量补充摘要。',
+      reason: '补足主榜没有覆盖的工程视角。',
+      link: 'https://secondary.example/article',
+      pubDate: new Date(),
+      sourceName: 'Secondary',
+      sourceUrl: 'https://secondary.example',
+      sourceTier: 'secondary',
+      score: 24,
+      scoreBreakdown: { relevance: 8, quality: 8, timeliness: 8 },
+      category: 'engineering',
+      keywords: ['engineering'],
+      projectMatches: [],
+    }], 15);
+
+    expect(markdown).toContain('## 🌍 补充视角');
+    expect(markdown).toContain('Top 15 未覆盖');
+    expect(markdown).toContain('**Secondary**');
+    expect(markdown).toContain('**二手来源**');
   });
 });
 
@@ -313,8 +392,33 @@ describe('project signal groups', () => {
 
     expect(satisfiesRequiredSignalGroups(
       agentSecurityProject,
+      'Amazon Bedrock AgentCore adds temporal policies and human approval for sensitive commands.'
+    )).toBe(true);
+
+    expect(satisfiesRequiredSignalGroups(
+      agentSecurityProject,
+      'A general API gateway adds rate limiting for ordinary web traffic.'
+    )).toBe(false);
+
+    expect(satisfiesRequiredSignalGroups(
+      agentSecurityProject,
       'An AI agent went rogue during safety tests and launched social engineering attacks.'
     )).toBe(true);
+  });
+
+  test('uses the configured Agent security controls without matching generic traffic controls', async () => {
+    const config = await Bun.file('config/projects.json').json();
+    const project = validateProjectsConfig(config)
+      .find(item => item.id === 'agent-security');
+    expect(project).toBeDefined();
+    expect(satisfiesRequiredSignalGroups(
+      project!,
+      'Amazon Bedrock AgentCore adds temporal policies and human approval for sensitive commands.'
+    )).toBe(true);
+    expect(satisfiesRequiredSignalGroups(
+      project!,
+      'A general API gateway adds rate limiting for ordinary web traffic.'
+    )).toBe(false);
   });
 
   test('accepts a production multi-agent build as architecture evidence', async () => {
@@ -475,6 +579,9 @@ describe('AI summary batches', () => {
     const summaries = await summarizeArticles(articles, aiClient, 'zh');
     expect(summaries.size).toBe(2);
     expect(prompts).toHaveLength(2);
+    expect(prompts[0]).toContain('不得从模型品牌、系列名称或公司背景推断开源');
+    expect(prompts[0]).toContain('单一榜单第一不能扩写为全面领先');
+    expect(prompts[0]).toContain('不得把主张改写成已确认事实');
     expect(prompts[1]).not.toContain('Index 0:');
     expect(prompts[1]).toContain('Index 1:');
   });

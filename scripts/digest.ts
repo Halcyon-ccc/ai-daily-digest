@@ -1,5 +1,5 @@
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { basename, dirname } from 'node:path';
 import process from 'node:process';
 
 // ============================================================================
@@ -21,12 +21,17 @@ const DEFAULT_DEEPSEEK_THINKING_TASKS = 'project-scoring,highlights';
 const DEFAULT_PROJECTS_CONFIG_PATH = 'config/projects.json';
 const DEFAULT_SOURCES_CONFIG_PATH = 'config/sources.json';
 const DESIGN_SECTION_ENABLED = /^(1|true|yes|on)$/i.test(process.env.DESIGN_SECTION_ENABLED?.trim() || '');
+const IGNORE_SAME_DAY_COOLDOWN = /^(1|true|yes|on)$/i.test(process.env.DIGEST_IGNORE_SAME_DAY_COOLDOWN?.trim() || '');
 const MAX_PROJECT_MATCHES_PER_ARTICLE = 5;
 const MAX_PROJECT_TEXT_LENGTH = 240;
 const DIGEST_COOLDOWN_HOURS = 48;
 const FIRST_PARTY_RANKING_BONUS = 2;
 const MAX_LOW_INFORMATION_PENALTY = 3;
 const SECONDARY_SOURCE_TOP_LIMIT = 2;
+const MAX_SUPPLEMENTAL_VIEWS = 3;
+const MIN_SUPPLEMENTAL_QUALITY = 6;
+const MIN_SUPPLEMENTAL_RELEVANCE = 6;
+const MIN_SUPPLEMENTAL_ADJUSTED_SCORE = 20;
 const AGGREGATOR_HOSTS = new Set([
   'news.ycombinator.com',
   'reddit.com',
@@ -202,7 +207,7 @@ const CATEGORY_META: Record<CategoryId, { emoji: string; label: string }> = {
 };
 
 type SourceTier = 'first-party' | 'research' | 'secondary' | 'community' | 'aggregator';
-type VerificationStatus = 'first-party' | 'traceable-secondary' | 'unverified';
+type VerificationStatus = 'first-party' | 'secondary' | 'traceable-secondary' | 'unverified';
 type ProjectSelectionPreset = 'strict' | 'balanced' | 'broad';
 
 interface FeedSource {
@@ -1753,6 +1758,11 @@ ${langInstruction}
 - 包含具体的技术名词、数据、方案名称或观点
 - 保留关键数字和指标（如性能提升百分比、用户数、版本号等）
 - 如果文章涉及对比或选型，要点出比较对象和结论
+- 只使用标题、来源和摘要明确提供的信息，不得补充看似合理但原文摘要没有支持的事实
+- 不得从模型品牌、系列名称或公司背景推断开源、开放权重、专有、许可证、免费范围或可用性；只有输入明确说明时才能写入
+- 数字、排名和实验结论必须保留原始范围与归因；单一榜单第一不能扩写为全面领先，来源自述不能写成独立验证结论
+- 输入未说明数据方法、样本构成或独立验证时，不得自行声称实验可靠、结论普遍成立或具有统计代表性
+- 保留“据报道”“该公司称”“该榜单显示”等不确定性和归因措辞，不得把主张改写成已确认事实
 - 目标：读者花 30 秒读完摘要，就能决定是否值得花 10 分钟读原文
 
 ## 待摘要文章
@@ -2080,12 +2090,14 @@ export function assessVerificationStatus(article: { title: string; description: 
 
   if (uncertain && (weakEvidence || !traceable)) return 'unverified';
   if ((article.sourceTier === 'secondary' || uncertain) && traceable) return 'traceable-secondary';
+  if (article.sourceTier === 'secondary') return 'secondary';
   return undefined;
 }
 
 function getVerificationLabel(article: { title: string; description: string; sourceTier?: SourceTier }): string {
   const status = assessVerificationStatus(article);
   if (status === 'first-party') return '一手来源';
+  if (status === 'secondary') return '二手来源';
   if (status === 'traceable-secondary') return '可追溯二手';
   if (status === 'unverified') return '待核实';
   return '';
@@ -2304,13 +2316,14 @@ export function rankArticles<T extends RankableArticle>(
   const coolingDown = ordered.filter(article => appearedInRecentDigest(article, recentHistory));
   const firstPartyBoosted = uniqueArticles.filter(article => article.sourceTier === 'first-party').length;
   const lowInformationPenalized = uniqueArticles.filter(article => getLowInformationPenalty(article) > 0).length;
+  const secondary = uniqueArticles.filter(article => assessVerificationStatus(article) === 'secondary').length;
   const traceableSecondary = uniqueArticles.filter(article => assessVerificationStatus(article) === 'traceable-secondary').length;
   const unverified = uniqueArticles.filter(article => assessVerificationStatus(article) === 'unverified').length;
   console.log(
     `[digest] Top ranking controls: uniqueEvents=${uniqueArticles.length}/${articles.length}, `
     + `duplicates=${articles.length - uniqueArticles.length}, cooldownCandidates=${coolingDown.length}, `
     + `firstPartyBoosted=${firstPartyBoosted}, lowInformationPenalized=${lowInformationPenalized}, `
-    + `traceableSecondary=${traceableSecondary}, unverified=${unverified}, `
+    + `secondary=${secondary}, traceableSecondary=${traceableSecondary}, unverified=${unverified}, `
     + `sourceCaps=${[...sourceLimitedNames].join(', ') || 'none'}`
   );
   const selected = applySourceTopLimits(fresh, topN);
@@ -2321,6 +2334,51 @@ export function rankArticles<T extends RankableArticle>(
     [...selected, ...coolingDown.filter(article => !selectedSet.has(article))],
     topN
   );
+}
+
+function getSourceIdentity(article: Pick<RankableArticle, 'sourceName' | 'sourceUrl'>): string {
+  try {
+    return new URL(article.sourceUrl).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return article.sourceName.toLowerCase().trim();
+  }
+}
+
+export function selectSupplementalViewCandidates<T extends RankableArticle>(
+  articles: T[],
+  topArticles: T[],
+  recentHistory: DigestHistoryEntry[] = [],
+  excludedArticles: T[] = topArticles,
+  limit = MAX_SUPPLEMENTAL_VIEWS
+): T[] {
+  if (limit <= 0) return [];
+
+  const topSourceIdentities = new Set(topArticles.map(getSourceIdentity));
+  const selectedSourceIdentities = new Set<string>();
+  const candidates = deduplicateRankedEvents(articles)
+    .filter(article => !excludedArticles.some(existing => isSameDigestEvent(article, existing)))
+    .filter(article => !appearedInRecentDigest(article, recentHistory))
+    .filter(article => !topSourceIdentities.has(getSourceIdentity(article)))
+    .filter(article => article.breakdown.quality >= MIN_SUPPLEMENTAL_QUALITY)
+    .filter(article => article.breakdown.relevance >= MIN_SUPPLEMENTAL_RELEVANCE)
+    .filter(article => getAdjustedGenericScore(article) >= MIN_SUPPLEMENTAL_ADJUSTED_SCORE)
+    .filter(article => assessVerificationStatus(article) !== 'unverified')
+    .sort(compareGenericRank);
+
+  const selected: T[] = [];
+  for (const article of candidates) {
+    const sourceIdentity = getSourceIdentity(article);
+    if (selectedSourceIdentities.has(sourceIdentity)) continue;
+    selected.push(article);
+    selectedSourceIdentities.add(sourceIdentity);
+    if (selected.length >= limit) break;
+  }
+
+  console.log(
+    `[digest] Supplemental views: qualified=${candidates.length}, selected=${selected.length}, `
+    + `sources=${selected.map(article => article.sourceName).join(', ') || 'none'}`
+  );
+  return selected;
 }
 
 export function extractTopDigestHistory(markdown: string): DigestHistoryEntry[] {
@@ -2351,13 +2409,16 @@ async function loadRecentHistory(
   outputPath: string,
   extractor: (markdown: string) => DigestHistoryEntry[],
   historyLabel: string,
-  now: Date
+  now: Date,
+  ignoreCurrentOutput: boolean
 ): Promise<DigestHistoryEntry[]> {
   const directory = dirname(outputPath);
+  const currentOutputName = basename(outputPath);
   const cutoff = now.getTime() - DIGEST_COOLDOWN_HOURS * 60 * 60 * 1000;
   try {
     const files = await readdir(directory);
     const recentFiles = files.filter(name => {
+      if (ignoreCurrentOutput && name === currentOutputName) return false;
       const match = name.match(/^digest-(\d{4})(\d{2})(\d{2})\.md$/);
       if (!match) return false;
       const fileDate = new Date(`${match[1]}-${match[2]}-${match[3]}T23:59:59Z`).getTime();
@@ -2376,12 +2437,12 @@ async function loadRecentHistory(
   }
 }
 
-export async function loadRecentDigestHistory(outputPath: string, now = new Date()): Promise<DigestHistoryEntry[]> {
-  return loadRecentHistory(outputPath, extractTopDigestHistory, 'generic digest', now);
+export async function loadRecentDigestHistory(outputPath: string, now = new Date(), ignoreCurrentOutput = false): Promise<DigestHistoryEntry[]> {
+  return loadRecentHistory(outputPath, extractTopDigestHistory, 'generic digest', now, ignoreCurrentOutput);
 }
 
-export async function loadRecentProjectDigestHistory(outputPath: string, now = new Date()): Promise<DigestHistoryEntry[]> {
-  return loadRecentHistory(outputPath, extractProjectDigestHistory, 'project digest', now);
+export async function loadRecentProjectDigestHistory(outputPath: string, now = new Date(), ignoreCurrentOutput = false): Promise<DigestHistoryEntry[]> {
+  return loadRecentHistory(outputPath, extractProjectDigestHistory, 'project digest', now, ignoreCurrentOutput);
 }
 
 interface ProjectIntelligenceCandidate<T> {
@@ -2606,6 +2667,25 @@ function renderProjectIntelligenceSection(articles: ScoredArticle[], projects: P
   return section;
 }
 
+export function renderSupplementalViewsSection(articles: ScoredArticle[], topArticleCount: number): string {
+  if (articles.length === 0) return '';
+
+  let section = `## 🌍 补充视角\n\n`;
+  section += `> Top ${topArticleCount} 未覆盖的高质量不同来源，最多 3 条。\n\n`;
+  for (let index = 0; index < articles.length; index++) {
+    const article = articles[index]!;
+    const category = CATEGORY_META[article.category];
+    const verificationLabel = getVerificationLabel(article);
+    const scoreTotal = article.scoreBreakdown.relevance + article.scoreBreakdown.quality + article.scoreBreakdown.timeliness;
+    section += `### ${index + 1}. ${article.titleZh || article.title}\n\n`;
+    section += `[${article.title}](${article.link}) — **${article.sourceName}** · ${humanizeTime(article.pubDate)} · ${category.emoji} ${category.label} · ⭐ ${scoreTotal}/30${verificationLabel ? ` · **${verificationLabel}**` : ''}\n\n`;
+    section += `> ${article.summary}\n\n`;
+    if (article.reason) section += `💡 **补充价值**：${article.reason}\n\n`;
+  }
+  section += `---\n\n`;
+  return section;
+}
+
 // ============================================================================
 // Report Generation
 // ============================================================================
@@ -2617,17 +2697,18 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
   filteredArticles: number;
   hours: number;
   lang: string;
-}, clawfeedContent: string, trendingRepos: TrendingRepo[], designArticles: DesignArticle[], projects: ProjectConfig[], projectArticles: ScoredArticle[]): string {
+}, clawfeedContent: string, trendingRepos: TrendingRepo[], designArticles: DesignArticle[], projects: ProjectConfig[], projectArticles: ScoredArticle[], supplementalArticles: ScoredArticle[]): string {
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
   const hasProjectIntelligence = projects.length > 0 && projectArticles.length > 0;
   const hasDesignIntelligence = designArticles.length > 0;
+  const hasSupplementalViews = supplementalArticles.length > 0;
 
   let report = `# 📰 AI 资讯每日精选 — ${dateStr}\n\n`;
   report += `> 汇聚 ${stats.totalFeeds}+ 技术博客、X/Twitter、Hacker News、Reddit、Product Hunt、\n`;
   report += `> Lobste.rs、ClawFeed 日报及 GitHub Trending，经 AI 评分筛选。\n`;
   report += `>\n`;
-  report += `> **本期内容**：🏆 今日必读 · 🌐 ClawFeed 日报 · 🔥 GitHub Trending · 📂 分类精选${hasDesignIntelligence ? ' · 🎨 设计与生成式 AI' : ''} · 📊 数据概览${hasProjectIntelligence ? ' · 🎯 项目相关情报' : ''}\n\n`;
+  report += `> **本期内容**：🏆 今日必读 · 🌐 ClawFeed 日报 · 🔥 GitHub Trending · 📂 分类精选${hasDesignIntelligence ? ' · 🎨 设计与生成式 AI' : ''} · 📊 数据概览${hasProjectIntelligence ? ' · 🎯 项目相关情报' : ''}${hasSupplementalViews ? ' · 🌍 补充视角' : ''}\n\n`;
 
   // ── Today's Highlights ──
   if (highlights) {
@@ -2751,8 +2832,10 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
 
   report += renderProjectIntelligenceSection(projectArticles, projects, articles);
 
+  report += renderSupplementalViewsSection(supplementalArticles, articles.length);
+
   // ── Footer ──
-  report += `*生成于 ${dateStr} ${now.toISOString().split('T')[1]?.slice(0, 5) || ''} | 汇聚 ${stats.totalFeeds} 个技术博客、X/Twitter、Hacker News、Reddit、Product Hunt、Lobste.rs、ClawFeed 日报及 GitHub Trending，经 AI 评分筛选出 Top ${articles.length} 精华内容*\n`;
+  report += `*生成于 ${dateStr} ${now.toISOString().split('T')[1]?.slice(0, 5) || ''} | 汇聚 ${stats.totalFeeds} 个技术博客、X/Twitter、Hacker News、Reddit、Product Hunt、Lobste.rs、ClawFeed 日报及 GitHub Trending，经 AI 评分筛选出 Top ${articles.length} 精华内容${supplementalArticles.length > 0 ? `，另附 ${supplementalArticles.length} 条不同来源补充视角` : ''}*\n`;
 
   return report;
 }
@@ -2783,6 +2866,7 @@ Environment:
   AI_REQUEST_TIMEOUT_MS Per-request timeout in milliseconds (default: 180000)
   DEEPSEEK_THINKING_TASKS Comma-separated tasks: project-scoring,summary,highlights,design; all or none (default: project-scoring,highlights)
   DESIGN_SECTION_ENABLED Enable the legacy Design & Generative AI section and its AI request (default: false)
+  DIGEST_IGNORE_SAME_DAY_COOLDOWN Ignore the current output file when loading 48h history (default: false)
   RSSHUB_BASE_URL  RSSHub instance URL for X/Twitter feeds (default: https://rsshub.app)
   X_ACCOUNTS       Comma-separated X/Twitter accounts to follow (e.g. karpathy,sama,ylecun)
   PROJECTS_CONFIG_PATH Optional project profile JSON path (default: config/projects.json)
@@ -2926,9 +3010,12 @@ async function main(): Promise<void> {
   }
 
   const [recentDigestHistory, recentProjectDigestHistory] = await Promise.all([
-    loadRecentDigestHistory(outputPath),
-    loadRecentProjectDigestHistory(outputPath),
+    loadRecentDigestHistory(outputPath, new Date(), IGNORE_SAME_DAY_COOLDOWN),
+    loadRecentProjectDigestHistory(outputPath, new Date(), IGNORE_SAME_DAY_COOLDOWN),
   ]);
+  if (IGNORE_SAME_DAY_COOLDOWN) {
+    console.log('[digest] Same-day cooldown: current output ignored for full manual regeneration');
+  }
   if (recentDigestHistory.length > 0) {
     console.log(`[digest] Recent digest cooldown: ${recentDigestHistory.length} Top N article(s) loaded from the last ${DIGEST_COOLDOWN_HOURS}h`);
   }
@@ -2937,6 +3024,12 @@ async function main(): Promise<void> {
   }
   const topArticles = rankArticles(scoredArticles, topN, recentDigestHistory);
   const projectCandidates = selectProjectIntelligenceCandidates(scoredArticles, projects, recentProjectDigestHistory);
+  const supplementalCandidates = selectSupplementalViewCandidates(
+    scoredArticles,
+    topArticles,
+    recentDigestHistory,
+    [...topArticles, ...projectCandidates.map(candidate => candidate.article)]
+  );
   
   console.log(`[digest] Top ${topN} articles selected (score range: ${topArticles[topArticles.length - 1]?.projectAwareScore || 0} - ${topArticles[0]?.projectAwareScore || 0})`);
   
@@ -2950,6 +3043,12 @@ async function main(): Promise<void> {
   }
   const additionalProjectSummaries = summaryArticles.length - topArticles.length;
   console.log(`[digest] Project intelligence: ${projectCandidates.length} unique articles, ${additionalProjectSummaries} additional summaries outside Top ${topN}`);
+  for (const article of supplementalCandidates) {
+    if (summaryArticleSet.has(article)) continue;
+    summaryArticleSet.add(article);
+    summaryArticles.push(article);
+  }
+  console.log(`[digest] Supplemental views: ${supplementalCandidates.length} additional summaries outside Top ${topN}`);
 
   const summaryIndexByArticle = new Map(summaryArticles.map((article, index) => [article, index]));
   const indexedSummaryArticles = summaryArticles.map((article, index) => ({ ...article, index }));
@@ -2993,6 +3092,9 @@ async function main(): Promise<void> {
   const projectIntelligenceArticles = projectCandidates.map(({ article, matches, cooldownProjectIds }) =>
     toScoredArticle(article, matches, cooldownProjectIds)
   );
+  const supplementalViewArticles = supplementalCandidates.map(article =>
+    toScoredArticle(article, article.breakdown.projectMatches)
+  );
   
   console.log(`[digest] Step 5/5: Generating today's highlights...`);
   const highlights = await generateHighlights(finalArticles, aiClient, lang);
@@ -3026,7 +3128,7 @@ async function main(): Promise<void> {
     filteredArticles: recentArticles.length,
     hours,
     lang,
-  }, clawfeedContent, trendingRepos, designArticles, projects, projectIntelligenceArticles);
+  }, clawfeedContent, trendingRepos, designArticles, projects, projectIntelligenceArticles, supplementalViewArticles);
   
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, report);
