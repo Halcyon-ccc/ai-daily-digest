@@ -13,10 +13,12 @@ import {
   loadConfiguredSources,
   extractTopDigestHistory,
   getGenericRankingAdjustment,
+  isLowInformationGeneratedSummary,
   isSameDigestEvent,
   loadRecentDigestHistory,
   loadRecentProjectDigestHistory,
   rankArticles,
+  renderProjectIntelligenceSection,
   renderSupplementalViewsSection,
   summarizeArticles,
   validateProjectsConfig,
@@ -295,6 +297,31 @@ describe('global digest ranking', () => {
     expect(backfilled.every(article => article.sourceName === 'Secondary')).toBe(true);
   });
 
+  test('soft-caps aggregator and community channels across individual feeds', () => {
+    const description = 'Detailed technical reporting with concrete implementation facts and enough evidence for ranking.';
+    const hackerNews = [30, 29, 28, 27, 26].map((score, index) => ({
+      ...makeArticle(`HN report ${index}`, `https://publisher-${index}.example/article`, 'Hacker News Best', score),
+      description,
+      sourceUrl: 'https://news.ycombinator.com',
+      sourceTier: 'aggregator' as const,
+    }));
+    const reddit = [25, 24, 23].map((score, index) => ({
+      ...makeArticle(`Reddit report ${index}`, `https://reddit.com/r/topic-${index}/article`, `r/topic-${index}`, score),
+      description,
+      sourceUrl: `https://reddit.com/r/topic-${index}`,
+      sourceTier: 'community' as const,
+    }));
+    const direct = [22, 21, 20].map((score, index) => ({
+      ...makeArticle(`Direct report ${index}`, `https://direct-${index}.example/article`, `Direct ${index}`, score),
+      description,
+    }));
+
+    const ranked = rankArticles([...hackerNews, ...reddit, ...direct], 8);
+    expect(ranked.filter(article => article.sourceTier === 'aggregator')).toHaveLength(3);
+    expect(ranked.filter(article => article.sourceTier === 'community')).toHaveLength(2);
+    expect(ranked).toHaveLength(8);
+  });
+
   test('selects up to three qualified supplemental views from sources absent from Top N', () => {
     const top = makeArticle('Top source article', 'https://top.example/article', 'Top', 30);
     const sameTopSource = makeArticle('Another strong article', 'https://top.example/another', 'Top', 29);
@@ -375,6 +402,23 @@ describe('project digest cooldown', () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe('project intelligence rendering', () => {
+  test('shows every configured project even when no article reaches its threshold', () => {
+    const asrProject = {
+      ...agentSecurityProject,
+      id: 'asr-voice',
+      name: 'ASR and voice assistants',
+    };
+    const markdown = renderProjectIntelligenceSection([], [agentSecurityProject, asrProject], []);
+
+    expect(markdown).toContain('## 🎯 项目相关情报');
+    expect(markdown).toContain('### Agent security');
+    expect(markdown).toContain('### ASR and voice assistants');
+    expect(markdown.match(/暂无达到质量门槛的项目相关情报。/g)).toHaveLength(2);
+    expect(renderProjectIntelligenceSection([], [], [])).toBe('');
   });
 });
 
@@ -605,6 +649,37 @@ describe('AI summary batches', () => {
 
     expect(calls).toBe(2);
     expect(summaries.get(0)?.summary).toBe('Raw fallback text');
+  });
+
+  test('retries meta-level uncertain summaries without rejecting factual uncertainty', async () => {
+    let calls = 0;
+    const summaries = await summarizeArticles([{
+      index: 0,
+      title: 'Leadership transition report',
+      description: 'The report says the executive may leave after the reorganization.',
+      link: 'https://example.com/leadership',
+      pubDate: new Date(),
+      sourceName: 'Test source',
+      sourceUrl: 'https://example.com',
+    }], {
+      async call(): Promise<string> {
+        calls++;
+        return JSON.stringify({
+          results: [{
+            index: 0,
+            titleZh: '领导层调整报道',
+            summary: calls === 1
+              ? '文章可能分析这次领导层调整产生的原因和后续影响。'
+              : '该报道表示，这名负责人可能在组织重组后离职，目前尚未将离职描述为已经确认的事实。',
+            reason: '保留来源对人事变化的不确定表述。',
+          }],
+        });
+      },
+    }, 'zh');
+
+    expect(calls).toBe(2);
+    expect(summaries.get(0)?.summary).toContain('可能在组织重组后离职');
+    expect(isLowInformationGeneratedSummary(summaries.get(0)!)).toBe(false);
   });
 });
 

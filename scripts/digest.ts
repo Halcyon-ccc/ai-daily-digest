@@ -28,10 +28,13 @@ const DIGEST_COOLDOWN_HOURS = 48;
 const FIRST_PARTY_RANKING_BONUS = 2;
 const MAX_LOW_INFORMATION_PENALTY = 3;
 const SECONDARY_SOURCE_TOP_LIMIT = 2;
+const AGGREGATOR_SOURCE_TOP_LIMIT = 3;
+const COMMUNITY_SOURCE_TOP_LIMIT = 2;
 const MAX_SUPPLEMENTAL_VIEWS = 3;
 const MIN_SUPPLEMENTAL_QUALITY = 6;
 const MIN_SUPPLEMENTAL_RELEVANCE = 6;
 const MIN_SUPPLEMENTAL_ADJUSTED_SCORE = 20;
+const MAX_SUMMARY_REPLACEMENT_CANDIDATES = 5;
 const AGGREGATOR_HOSTS = new Set([
   'news.ycombinator.com',
   'reddit.com',
@@ -163,16 +166,16 @@ const RSS_FEEDS: FeedSource[] = [
   { name: "Runway Research", xmlUrl: "https://research.runwayml.com/feed.xml", htmlUrl: "https://research.runwayml.com" },
 
   // ── Additional Sources: HN, Reddit, Product Hunt, Lobste.rs ──
-  { name: "Hacker News Best", xmlUrl: "https://hnrss.org/best", htmlUrl: "https://news.ycombinator.com" },
-  { name: "r/programming", xmlUrl: "https://www.reddit.com/r/programming/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/programming" },
-  { name: "r/MachineLearning", xmlUrl: "https://www.reddit.com/r/MachineLearning/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/MachineLearning" },
-  { name: "r/LocalLLaMA", xmlUrl: "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/LocalLLaMA" },
-  { name: "r/StableDiffusion", xmlUrl: "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/StableDiffusion" },
-  { name: "r/midjourney", xmlUrl: "https://www.reddit.com/r/midjourney/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/midjourney" },
-  { name: "r/comfyui", xmlUrl: "https://www.reddit.com/r/comfyui/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/comfyui" },
-  { name: "r/singularity", xmlUrl: "https://www.reddit.com/r/singularity/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/singularity" },
-  { name: "Product Hunt", xmlUrl: "https://www.producthunt.com/feed", htmlUrl: "https://www.producthunt.com" },
-  { name: "Lobste.rs", xmlUrl: "https://lobste.rs/rss", htmlUrl: "https://lobste.rs" },
+  { name: "Hacker News Best", xmlUrl: "https://hnrss.org/best", htmlUrl: "https://news.ycombinator.com", tier: "aggregator" },
+  { name: "r/programming", xmlUrl: "https://www.reddit.com/r/programming/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/programming", tier: "community" },
+  { name: "r/MachineLearning", xmlUrl: "https://www.reddit.com/r/MachineLearning/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/MachineLearning", tier: "community" },
+  { name: "r/LocalLLaMA", xmlUrl: "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/LocalLLaMA", tier: "community" },
+  { name: "r/StableDiffusion", xmlUrl: "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/StableDiffusion", tier: "community" },
+  { name: "r/midjourney", xmlUrl: "https://www.reddit.com/r/midjourney/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/midjourney", tier: "community" },
+  { name: "r/comfyui", xmlUrl: "https://www.reddit.com/r/comfyui/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/comfyui", tier: "community" },
+  { name: "r/singularity", xmlUrl: "https://www.reddit.com/r/singularity/top/.rss?t=day", htmlUrl: "https://www.reddit.com/r/singularity", tier: "community" },
+  { name: "Product Hunt", xmlUrl: "https://www.producthunt.com/feed", htmlUrl: "https://www.producthunt.com", tier: "aggregator" },
+  { name: "Lobste.rs", xmlUrl: "https://lobste.rs/rss", htmlUrl: "https://lobste.rs", tier: "aggregator" },
 ];
 
 // X/Twitter feeds via RSSHub proxy
@@ -1763,6 +1766,7 @@ ${langInstruction}
 - 数字、排名和实验结论必须保留原始范围与归因；单一榜单第一不能扩写为全面领先，来源自述不能写成独立验证结论
 - 输入未说明数据方法、样本构成或独立验证时，不得自行声称实验可靠、结论普遍成立或具有统计代表性
 - 保留“据报道”“该公司称”“该榜单显示”等不确定性和归因措辞，不得把主张改写成已确认事实
+- 如果输入不足以支持至少两条具体事实，不要猜测文章可能讨论什么；请在 summary 末尾明确添加“[信息不足]”
 - 目标：读者花 30 秒读完摘要，就能决定是否值得花 10 分钟读原文
 
 ## 待摘要文章
@@ -1782,6 +1786,12 @@ ${articlesList}
 }`;
 }
 
+const LOW_INFORMATION_SUMMARY_REGEX = /\[信息不足\]|(?:文章|本文|该文|作者)(?:可能|或许|似乎|大概)(?:会|将|还会|进一步|主要)?(?:涉及|讨论|分析|探讨|介绍|包括|聚焦)|(?:may|might|could) (?:discuss|cover|analy[sz]e|explore|include)|(?:信息|细节|原文)(?:不足|有限|未提供|未说明)|insufficient (?:information|detail)|details? (?:are|were) not (?:provided|available)/i;
+
+export function isLowInformationGeneratedSummary(summary: Pick<ArticleSummary, 'summary' | 'reason'>): boolean {
+  return !summary.reason.trim() || LOW_INFORMATION_SUMMARY_REGEX.test(`${summary.summary} ${summary.reason}`);
+}
+
 function validateSummaryResult(raw: unknown, allowedIndices: Set<number>): { index: number; summary: ArticleSummary } | null {
   if (!raw || typeof raw !== 'object') return null;
   const record = raw as Record<string, unknown>;
@@ -1796,7 +1806,9 @@ function validateSummaryResult(raw: unknown, allowedIndices: Set<number>): { ind
   const summary = typeof record.summary === 'string' ? record.summary.trim() : '';
   const reason = typeof record.reason === 'string' ? record.reason.trim() : '';
   if (!titleZh || summary.length < 20 || !reason) return null;
-  return { index, summary: { titleZh, summary, reason } };
+  const validated = { titleZh, summary, reason };
+  if (isLowInformationGeneratedSummary(validated)) return null;
+  return { index, summary: validated };
 }
 
 function buildSummaryFallback(article: { title: string; description: string }): ArticleSummary {
@@ -2257,21 +2269,65 @@ function appearedInRecentDigest(article: RankableArticle, history: DigestHistory
   });
 }
 
+function getSourceChannelIdentity(article: Pick<RankableArticle, 'sourceName' | 'sourceUrl'>): string {
+  try {
+    return new URL(article.sourceUrl).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return article.sourceName.toLowerCase().trim();
+  }
+}
+
+function getArticlePublisherIdentity(article: Pick<RankableArticle, 'link'>): string {
+  try {
+    return new URL(article.link).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return article.link.toLowerCase().trim();
+  }
+}
+
+function getDefaultSourceTopLimit(sourceTier?: SourceTier): number {
+  if (sourceTier === 'secondary') return SECONDARY_SOURCE_TOP_LIMIT;
+  if (sourceTier === 'aggregator') return AGGREGATOR_SOURCE_TOP_LIMIT;
+  if (sourceTier === 'community') return COMMUNITY_SOURCE_TOP_LIMIT;
+  return Infinity;
+}
+
+function getSourceTopLimit(article: Pick<RankableArticle, 'sourceMaxTopItems' | 'sourceTier'>): number {
+  return article.sourceMaxTopItems ?? getDefaultSourceTopLimit(article.sourceTier);
+}
+
+function formatIdentityDistribution(identities: string[]): string {
+  const counts = new Map<string, number>();
+  for (const identity of identities) counts.set(identity, (counts.get(identity) || 0) + 1);
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 5)
+    .map(([identity, count]) => `${identity}:${count}`)
+    .join(', ') || 'none';
+}
+
+function logTopSourceDistribution(articles: RankableArticle[]): void {
+  console.log(
+    `[digest] Top source distribution: channels=${formatIdentityDistribution(articles.map(getSourceChannelIdentity))}; `
+    + `publishers=${formatIdentityDistribution(articles.map(getArticlePublisherIdentity))}`
+  );
+}
+
 function applySourceTopLimits<T extends RankableArticle>(articles: T[], topN: number): T[] {
   const selected: T[] = [];
   const deferred: T[] = [];
   const sourceCounts = new Map<string, number>();
   for (const article of articles) {
-    const count = sourceCounts.get(article.sourceName) || 0;
+    const sourceIdentity = getSourceChannelIdentity(article);
+    const count = sourceCounts.get(sourceIdentity) || 0;
+    const sourceLimit = getSourceTopLimit(article);
     if (article.sourceMaxTopItems !== undefined && count >= article.sourceMaxTopItems) continue;
-    if (article.sourceMaxTopItems === undefined
-      && article.sourceTier === 'secondary'
-      && count >= SECONDARY_SOURCE_TOP_LIMIT) {
+    if (article.sourceMaxTopItems === undefined && count >= sourceLimit) {
       deferred.push(article);
       continue;
     }
     selected.push(article);
-    sourceCounts.set(article.sourceName, count + 1);
+    sourceCounts.set(sourceIdentity, count + 1);
     if (selected.length >= topN) break;
   }
   if (selected.length < topN) selected.push(...deferred.slice(0, topN - selected.length));
@@ -2284,15 +2340,16 @@ export function rankArticles<T extends RankableArticle>(
   recentHistory: DigestHistoryEntry[] = []
 ): T[] {
   const uniqueArticles = deduplicateRankedEvents(articles);
-  const sourceLimitedNames = new Set(uniqueArticles
-    .filter(article => article.sourceMaxTopItems !== undefined || article.sourceTier === 'secondary')
-    .map(article => article.sourceName)
-    .filter(sourceName => {
-      const sourceArticles = uniqueArticles.filter(article => article.sourceName === sourceName);
-      const sourceLimit = sourceArticles[0]?.sourceMaxTopItems
-        ?? (sourceArticles[0]?.sourceTier === 'secondary' ? SECONDARY_SOURCE_TOP_LIMIT : Infinity);
-      return sourceArticles.length > sourceLimit;
-    }));
+  const sourceGroups = new Map<string, T[]>();
+  for (const article of uniqueArticles) {
+    const identity = getSourceChannelIdentity(article);
+    const group = sourceGroups.get(identity);
+    if (group) group.push(article);
+    else sourceGroups.set(identity, [article]);
+  }
+  const sourceLimitedNames = new Set([...sourceGroups.entries()]
+    .filter(([, sourceArticles]) => sourceArticles.length > getSourceTopLimit(sourceArticles[0]!))
+    .map(([identity]) => identity));
   const matched = uniqueArticles.filter(article => article.breakdown.projectMatches.length > 0);
   let ordered: T[];
 
@@ -2327,21 +2384,18 @@ export function rankArticles<T extends RankableArticle>(
     + `sourceCaps=${[...sourceLimitedNames].join(', ') || 'none'}`
   );
   const selected = applySourceTopLimits(fresh, topN);
-  if (selected.length >= topN || coolingDown.length === 0) return selected;
+  if (selected.length >= topN || coolingDown.length === 0) {
+    logTopSourceDistribution(selected);
+    return selected;
+  }
 
   const selectedSet = new Set(selected);
-  return applySourceTopLimits(
+  const withBackfill = applySourceTopLimits(
     [...selected, ...coolingDown.filter(article => !selectedSet.has(article))],
     topN
   );
-}
-
-function getSourceIdentity(article: Pick<RankableArticle, 'sourceName' | 'sourceUrl'>): string {
-  try {
-    return new URL(article.sourceUrl).hostname.toLowerCase().replace(/^www\./, '');
-  } catch {
-    return article.sourceName.toLowerCase().trim();
-  }
+  logTopSourceDistribution(withBackfill);
+  return withBackfill;
 }
 
 export function selectSupplementalViewCandidates<T extends RankableArticle>(
@@ -2353,12 +2407,15 @@ export function selectSupplementalViewCandidates<T extends RankableArticle>(
 ): T[] {
   if (limit <= 0) return [];
 
-  const topSourceIdentities = new Set(topArticles.map(getSourceIdentity));
+  const topSourceIdentities = new Set(topArticles.map(getSourceChannelIdentity));
+  const topPublisherIdentities = new Set(topArticles.map(getArticlePublisherIdentity));
   const selectedSourceIdentities = new Set<string>();
+  const selectedPublisherIdentities = new Set<string>();
   const candidates = deduplicateRankedEvents(articles)
     .filter(article => !excludedArticles.some(existing => isSameDigestEvent(article, existing)))
     .filter(article => !appearedInRecentDigest(article, recentHistory))
-    .filter(article => !topSourceIdentities.has(getSourceIdentity(article)))
+    .filter(article => !topSourceIdentities.has(getSourceChannelIdentity(article)))
+    .filter(article => !topPublisherIdentities.has(getArticlePublisherIdentity(article)))
     .filter(article => article.breakdown.quality >= MIN_SUPPLEMENTAL_QUALITY)
     .filter(article => article.breakdown.relevance >= MIN_SUPPLEMENTAL_RELEVANCE)
     .filter(article => getAdjustedGenericScore(article) >= MIN_SUPPLEMENTAL_ADJUSTED_SCORE)
@@ -2367,10 +2424,12 @@ export function selectSupplementalViewCandidates<T extends RankableArticle>(
 
   const selected: T[] = [];
   for (const article of candidates) {
-    const sourceIdentity = getSourceIdentity(article);
-    if (selectedSourceIdentities.has(sourceIdentity)) continue;
+    const sourceIdentity = getSourceChannelIdentity(article);
+    const publisherIdentity = getArticlePublisherIdentity(article);
+    if (selectedSourceIdentities.has(sourceIdentity) || selectedPublisherIdentities.has(publisherIdentity)) continue;
     selected.push(article);
     selectedSourceIdentities.add(sourceIdentity);
+    selectedPublisherIdentities.add(publisherIdentity);
     if (selected.length >= limit) break;
   }
 
@@ -2612,7 +2671,7 @@ export function selectProjectIntelligenceCandidates<
   return Array.from(selectedByArticle, ([article, selection]) => ({ article, ...selection }));
 }
 
-function renderProjectIntelligenceSection(articles: ScoredArticle[], projects: ProjectConfig[], topArticles: ScoredArticle[]): string {
+export function renderProjectIntelligenceSection(articles: ScoredArticle[], projects: ProjectConfig[], topArticles: ScoredArticle[]): string {
   if (projects.length === 0) return '';
 
   const projectById = new Map(projects.map(project => [project.id, project]));
@@ -2628,13 +2687,15 @@ function renderProjectIntelligenceSection(articles: ScoredArticle[], projects: P
     }
   }
 
-  if (grouped.size === 0) return '';
-
   let section = `## 🎯 项目相关情报\n\n`;
 
   for (const project of projects) {
     const items = grouped.get(project.id);
-    if (!items || items.length === 0) continue;
+    section += `### ${project.name}\n\n`;
+    if (!items || items.length === 0) {
+      section += `> 暂无达到质量门槛的项目相关情报。\n\n`;
+      continue;
+    }
 
     items.sort((a, b) =>
       b.match.projectRelevance - a.match.projectRelevance
@@ -2642,7 +2703,6 @@ function renderProjectIntelligenceSection(articles: ScoredArticle[], projects: P
       || b.article.score - a.article.score
     );
 
-    section += `### ${project.name}\n\n`;
     for (const { article, match } of items) {
       const includedInTop = topArticleUrls.has(normalizeArticleUrl(article.link));
       const isCooldownBackfill = article.projectCooldownIds?.includes(match.projectId) || false;
@@ -2700,7 +2760,7 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
 }, clawfeedContent: string, trendingRepos: TrendingRepo[], designArticles: DesignArticle[], projects: ProjectConfig[], projectArticles: ScoredArticle[], supplementalArticles: ScoredArticle[]): string {
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
-  const hasProjectIntelligence = projects.length > 0 && projectArticles.length > 0;
+  const hasProjectProfiles = projects.length > 0;
   const hasDesignIntelligence = designArticles.length > 0;
   const hasSupplementalViews = supplementalArticles.length > 0;
 
@@ -2708,7 +2768,7 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
   report += `> 汇聚 ${stats.totalFeeds}+ 技术博客、X/Twitter、Hacker News、Reddit、Product Hunt、\n`;
   report += `> Lobste.rs、ClawFeed 日报及 GitHub Trending，经 AI 评分筛选。\n`;
   report += `>\n`;
-  report += `> **本期内容**：🏆 今日必读 · 🌐 ClawFeed 日报 · 🔥 GitHub Trending · 📂 分类精选${hasDesignIntelligence ? ' · 🎨 设计与生成式 AI' : ''} · 📊 数据概览${hasProjectIntelligence ? ' · 🎯 项目相关情报' : ''}${hasSupplementalViews ? ' · 🌍 补充视角' : ''}\n\n`;
+  report += `> **本期内容**：🏆 今日必读 · 🌐 ClawFeed 日报 · 🔥 GitHub Trending · 📂 分类精选${hasDesignIntelligence ? ' · 🎨 设计与生成式 AI' : ''} · 📊 数据概览${hasProjectProfiles ? ' · 🎯 项目相关情报' : ''}${hasSupplementalViews ? ' · 🌍 补充视角' : ''}\n\n`;
 
   // ── Today's Highlights ──
   if (highlights) {
@@ -3022,16 +3082,14 @@ async function main(): Promise<void> {
   if (recentProjectDigestHistory.length > 0) {
     console.log(`[digest] Recent project cooldown: ${recentProjectDigestHistory.length} project article(s) loaded from the last ${DIGEST_COOLDOWN_HOURS}h`);
   }
-  const topArticles = rankArticles(scoredArticles, topN, recentDigestHistory);
-  const projectCandidates = selectProjectIntelligenceCandidates(scoredArticles, projects, recentProjectDigestHistory);
-  const supplementalCandidates = selectSupplementalViewCandidates(
+  const rankedArticles = rankArticles(
     scoredArticles,
-    topArticles,
-    recentDigestHistory,
-    [...topArticles, ...projectCandidates.map(candidate => candidate.article)]
+    Math.min(scoredArticles.length, topN + MAX_SUMMARY_REPLACEMENT_CANDIDATES),
+    recentDigestHistory
   );
-  
-  console.log(`[digest] Top ${topN} articles selected (score range: ${topArticles[topArticles.length - 1]?.projectAwareScore || 0} - ${topArticles[0]?.projectAwareScore || 0})`);
+  let topArticles = rankedArticles.slice(0, topN);
+  const replacementCandidates = rankedArticles.slice(topN);
+  const projectCandidates = selectProjectIntelligenceCandidates(scoredArticles, projects, recentProjectDigestHistory);
   
   console.log(`[digest] Step 4/5: Generating AI summaries...`);
   const summaryArticles = [...topArticles];
@@ -3043,16 +3101,62 @@ async function main(): Promise<void> {
   }
   const additionalProjectSummaries = summaryArticles.length - topArticles.length;
   console.log(`[digest] Project intelligence: ${projectCandidates.length} unique articles, ${additionalProjectSummaries} additional summaries outside Top ${topN}`);
-  for (const article of supplementalCandidates) {
-    if (summaryArticleSet.has(article)) continue;
-    summaryArticleSet.add(article);
-    summaryArticles.push(article);
-  }
-  console.log(`[digest] Supplemental views: ${supplementalCandidates.length} additional summaries outside Top ${topN}`);
 
   const summaryIndexByArticle = new Map(summaryArticles.map((article, index) => [article, index]));
   const indexedSummaryArticles = summaryArticles.map((article, index) => ({ ...article, index }));
   const summaries = await summarizeArticles(indexedSummaryArticles, aiClient, lang);
+
+  const summarizeAdditionalArticles = async (articles: typeof scoredArticles): Promise<void> => {
+    const unsummarized = articles.filter(article => !summaryIndexByArticle.has(article));
+    const indexed = unsummarized.map(article => {
+      const index = summaryIndexByArticle.size;
+      summaryIndexByArticle.set(article, index);
+      return { ...article, index };
+    });
+    if (indexed.length === 0) return;
+    const additionalSummaries = await summarizeArticles(indexed, aiClient, lang);
+    for (const [index, summary] of additionalSummaries) summaries.set(index, summary);
+  };
+
+  const hasUsableSummary = (article: (typeof scoredArticles)[number]): boolean => {
+    const index = summaryIndexByArticle.get(article);
+    const summary = index === undefined ? undefined : summaries.get(index);
+    return summary !== undefined && !isLowInformationGeneratedSummary(summary);
+  };
+
+  const rejectedTopArticles = topArticles.filter(article => !hasUsableSummary(article));
+  if (rejectedTopArticles.length > 0) {
+    console.warn(`[digest] Post-summary quality gate: demoting ${rejectedTopArticles.length} low-information Top article(s)`);
+    const replacementAttempts = replacementCandidates.slice(
+      0,
+      Math.min(MAX_SUMMARY_REPLACEMENT_CANDIDATES, rejectedTopArticles.length * 2)
+    );
+    await summarizeAdditionalArticles(replacementAttempts);
+    const acceptedReplacements = replacementAttempts
+      .filter(hasUsableSummary)
+      .slice(0, rejectedTopArticles.length);
+    const rejectedSet = new Set(rejectedTopArticles);
+    topArticles = [
+      ...topArticles.filter(article => !rejectedSet.has(article)),
+      ...acceptedReplacements,
+    ];
+    console.log(
+      `[digest] Post-summary quality gate: replacements=${acceptedReplacements.length}, `
+      + `finalTop=${topArticles.length}/${topN}`
+    );
+  }
+
+  const supplementalCandidates = selectSupplementalViewCandidates(
+    scoredArticles,
+    topArticles,
+    recentDigestHistory,
+    [...topArticles, ...projectCandidates.map(candidate => candidate.article), ...rejectedTopArticles]
+  );
+  await summarizeAdditionalArticles(supplementalCandidates);
+  const finalSupplementalCandidates = supplementalCandidates.filter(hasUsableSummary);
+  console.log(`[digest] Supplemental views: ${finalSupplementalCandidates.length} quality-approved summaries outside Top ${topN}`);
+  console.log(`[digest] Top ${topArticles.length} articles selected (score range: ${topArticles[topArticles.length - 1]?.projectAwareScore || 0} - ${topArticles[0]?.projectAwareScore || 0})`);
+  logTopSourceDistribution(topArticles);
 
   const toScoredArticle = (
     article: (typeof scoredArticles)[number],
@@ -3092,7 +3196,7 @@ async function main(): Promise<void> {
   const projectIntelligenceArticles = projectCandidates.map(({ article, matches, cooldownProjectIds }) =>
     toScoredArticle(article, matches, cooldownProjectIds)
   );
-  const supplementalViewArticles = supplementalCandidates.map(article =>
+  const supplementalViewArticles = finalSupplementalCandidates.map(article =>
     toScoredArticle(article, article.breakdown.projectMatches)
   );
   
