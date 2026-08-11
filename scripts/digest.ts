@@ -33,8 +33,11 @@ const COMMUNITY_SOURCE_TOP_LIMIT = 2;
 const MAX_SUPPLEMENTAL_VIEWS = 3;
 const MIN_SUPPLEMENTAL_QUALITY = 6;
 const MIN_SUPPLEMENTAL_RELEVANCE = 6;
-const MIN_SUPPLEMENTAL_ADJUSTED_SCORE = 20;
+const MIN_SUPPLEMENTAL_ADJUSTED_SCORE = 22;
 const MAX_SUMMARY_REPLACEMENT_CANDIDATES = 5;
+const DEFAULT_GENERIC_MAX_ITEMS = 50;
+const MAX_PROJECT_RESEARCH_CANDIDATES_PER_PROFILE = 4;
+const MAX_TOTAL_PROJECT_RESEARCH_CANDIDATES = 8;
 const AGGREGATOR_HOSTS = new Set([
   'news.ycombinator.com',
   'reddit.com',
@@ -212,6 +215,7 @@ const CATEGORY_META: Record<CategoryId, { emoji: string; label: string }> = {
 type SourceTier = 'first-party' | 'research' | 'secondary' | 'community' | 'aggregator';
 type VerificationStatus = 'first-party' | 'secondary' | 'traceable-secondary' | 'unverified';
 type ProjectSelectionPreset = 'strict' | 'balanced' | 'broad';
+type ResearchMode = 'disabled' | 'section' | 'replace-generic' | 'hybrid';
 
 interface FeedSource {
   name: string;
@@ -265,6 +269,43 @@ interface ProjectConfig {
   sourcePreferences: ProjectSourcePreferences;
 }
 
+interface DigestPolicy {
+  includeGeneric: boolean;
+  genericMaxItems: number;
+}
+
+interface LoadedProjectConfig {
+  projects: ProjectConfig[];
+  digestPolicy: DigestPolicy;
+  researchPolicy: ResearchPolicy;
+}
+
+interface ResearchPolicy {
+  enabled: boolean;
+  mode: ResearchMode;
+  topics: string[];
+  maxItems: number;
+  candidateLimit: number;
+  minFrontierScore: number;
+  minEvidenceScore: number;
+  minAttentionScore: number;
+}
+
+interface ResearchAssessment {
+  frontierScore: number;
+  evidenceScore: number;
+  impactScore: number;
+  reproducibilityScore: number;
+  whyImportant: string;
+  limitations: string;
+}
+
+interface ResearchIntelligenceArticle extends ScoredArticle {
+  researchAssessment: ResearchAssessment;
+  attentionScore: number;
+  attentionSignals: string[];
+}
+
 interface ProjectSelection {
   preset: ProjectSelectionPreset;
   minMatchRelevance: number;
@@ -310,7 +351,7 @@ interface ArticleSummary {
   reason: string;
 }
 
-type AITask = 'scoring' | 'project-scoring' | 'summary' | 'highlights' | 'design';
+type AITask = 'scoring' | 'project-scoring' | 'research-scoring' | 'summary' | 'highlights' | 'design';
 type AIProvider = 'gemini' | 'openai';
 
 interface AIClient {
@@ -902,7 +943,7 @@ export function buildOpenAIRequestBody(
   };
 
   if (isDeepSeekV4) {
-    if (task === 'scoring' || task === 'project-scoring' || task === 'summary' || task === 'design') {
+    if (task === 'scoring' || task === 'project-scoring' || task === 'research-scoring' || task === 'summary' || task === 'design') {
       requestBody.response_format = { type: 'json_object' };
     }
     requestBody.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' };
@@ -990,7 +1031,7 @@ function inferOpenAIModel(apiBase: string): string {
 }
 
 function parseDeepSeekThinkingTasks(value: string | undefined): Set<AITask> {
-  const validTasks = new Set<AITask>(['project-scoring', 'summary', 'highlights', 'design']);
+  const validTasks = new Set<AITask>(['project-scoring', 'research-scoring', 'summary', 'highlights', 'design']);
   const configured = (value?.trim().toLowerCase() || DEFAULT_DEEPSEEK_THINKING_TASKS);
 
   if (configured === 'all') return new Set(validTasks);
@@ -1276,27 +1317,90 @@ export function validateProjectsConfig(value: unknown): ProjectConfig[] {
     });
 }
 
-async function loadProjects(configPath = process.env.PROJECTS_CONFIG_PATH || DEFAULT_PROJECTS_CONFIG_PATH): Promise<ProjectConfig[]> {
+function validateDigestPolicy(value: unknown): DigestPolicy {
+  const defaults: DigestPolicy = {
+    includeGeneric: true,
+    genericMaxItems: DEFAULT_GENERIC_MAX_ITEMS,
+  };
+  if (!value || typeof value !== 'object') return defaults;
+
+  const record = value as Record<string, unknown>;
+  return {
+    includeGeneric: typeof record.includeGeneric === 'boolean' ? record.includeGeneric : defaults.includeGeneric,
+    genericMaxItems: normalizeBoundedInteger(record.genericMaxItems, defaults.genericMaxItems, 0, 50),
+  };
+}
+
+function validateResearchPolicy(value: unknown): ResearchPolicy {
+  const defaults: ResearchPolicy = {
+    enabled: false,
+    mode: 'disabled',
+    topics: ['llm', 'agent'],
+    maxItems: 3,
+    candidateLimit: 20,
+    minFrontierScore: 7,
+    minEvidenceScore: 6,
+    minAttentionScore: 4,
+  };
+  if (!value || typeof value !== 'object') return defaults;
+
+  const record = value as Record<string, unknown>;
+  const validModes = new Set<ResearchMode>(['disabled', 'section', 'replace-generic', 'hybrid']);
+  const enabled = typeof record.enabled === 'boolean' ? record.enabled : true;
+  const mode = typeof record.mode === 'string' && validModes.has(record.mode as ResearchMode)
+    ? record.mode as ResearchMode
+    : 'hybrid';
+  return {
+    enabled: enabled && mode !== 'disabled',
+    mode: enabled ? mode : 'disabled',
+    topics: normalizeStringArray(record.topics).slice(0, 10).length > 0
+      ? normalizeStringArray(record.topics).slice(0, 10)
+      : defaults.topics,
+    maxItems: normalizeBoundedInteger(record.maxItems, defaults.maxItems, 0, 10),
+    candidateLimit: normalizeBoundedInteger(record.candidateLimit, defaults.candidateLimit, 1, 50),
+    minFrontierScore: normalizeBoundedInteger(record.minFrontierScore, defaults.minFrontierScore, 1, 10),
+    minEvidenceScore: normalizeBoundedInteger(record.minEvidenceScore, defaults.minEvidenceScore, 1, 10),
+    minAttentionScore: normalizeBoundedInteger(record.minAttentionScore, defaults.minAttentionScore, 1, 10),
+  };
+}
+
+function resolveDigestPolicy(configPolicy: DigestPolicy): DigestPolicy {
+  const mode = process.env.DIGEST_GENERIC_MODE?.trim().toLowerCase();
+  if (!mode || mode === 'config') return configPolicy;
+  if (mode === 'include') return { ...configPolicy, includeGeneric: true };
+  if (mode === 'project-only') return { ...configPolicy, includeGeneric: false };
+  console.warn(`[digest] Unknown DIGEST_GENERIC_MODE=${mode}; using config policy`);
+  return configPolicy;
+}
+
+async function loadProjects(configPath = process.env.PROJECTS_CONFIG_PATH || DEFAULT_PROJECTS_CONFIG_PATH): Promise<LoadedProjectConfig> {
+  const fallback: LoadedProjectConfig = {
+    projects: [],
+    digestPolicy: validateDigestPolicy(undefined),
+    researchPolicy: validateResearchPolicy(undefined),
+  };
   try {
     const text = await readFile(configPath, 'utf8');
-    const parsed = JSON.parse(text) as { projects?: unknown };
+    const parsed = JSON.parse(text) as { projects?: unknown; digestPolicy?: unknown; researchPolicy?: unknown };
 
     if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.projects)) {
       console.warn(`[digest] Project config: ${configPath} does not contain a valid projects array; using generic digest`);
-      return [];
+      return fallback;
     }
 
     const projects = validateProjectsConfig(parsed);
+    const digestPolicy = validateDigestPolicy(parsed.digestPolicy);
+    const researchPolicy = validateResearchPolicy(parsed.researchPolicy);
 
     console.log(`[digest] Loaded ${projects.length} projects from ${configPath}`);
     if (projects.length === 0) {
       console.warn(`[digest] Project config: no valid projects loaded; using generic digest`);
     }
-    return projects;
+    return { projects, digestPolicy, researchPolicy };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.warn(`[digest] Project config: could not load ${configPath} (${msg}); using generic digest`);
-    return [];
+    return fallback;
   }
 }
 
@@ -1682,6 +1786,63 @@ function articleMightMatchProject(article: Article, project: ProjectConfig): boo
   return configuredSignals.some(signal => containsConfiguredSignal(articleText, signal));
 }
 
+function selectDiverseRecentArticles<T extends Article>(articles: T[], limit: number): T[] {
+  if (limit <= 0) return [];
+  const groups = new Map<string, T[]>();
+  const seenUrls = new Set<string>();
+  for (const article of articles) {
+    const normalizedUrl = normalizeArticleUrl(article.link);
+    if (seenUrls.has(normalizedUrl)) continue;
+    seenUrls.add(normalizedUrl);
+    const items = groups.get(article.sourceName) || [];
+    items.push(article);
+    groups.set(article.sourceName, items);
+  }
+  for (const items of groups.values()) {
+    items.sort((a, b) => b.pubDate.getTime() - a.pubDate.getTime());
+  }
+  const selected: T[] = [];
+  while (selected.length < limit) {
+    let added = false;
+    for (const items of groups.values()) {
+      const article = items.shift();
+      if (!article) continue;
+      selected.push(article);
+      added = true;
+      if (selected.length >= limit) break;
+    }
+    if (!added) break;
+  }
+  return selected;
+}
+
+export function selectArticlesForAIScoring(
+  articles: Article[],
+  projects: ProjectConfig[],
+  researchPolicy: ResearchPolicy
+): Article[] {
+  const researchSourceArticles = articles.filter(article => article.sourceTier === 'research');
+  const selectedResearch = new Set<Article>(selectDiverseRecentArticles(
+    researchPolicy.enabled
+      ? researchSourceArticles.filter(article => isResearchPaperCandidate(article, researchPolicy.topics))
+      : [],
+    researchPolicy.candidateLimit
+  ));
+  for (const project of projects) {
+    const projectCandidates = selectDiverseRecentArticles(
+      researchSourceArticles.filter(article => articleMightMatchProject(article, project)),
+      MAX_PROJECT_RESEARCH_CANDIDATES_PER_PROFILE
+    );
+    for (const article of projectCandidates) selectedResearch.add(article);
+  }
+  const selected = articles.filter(article => article.sourceTier !== 'research' || selectedResearch.has(article));
+  console.log(
+    `[digest] Research pre-scoring cap: kept=${selectedResearch.size}/${researchSourceArticles.length} research-source articles; `
+    + `totalAI=${selected.length}/${articles.length}`
+  );
+  return selected;
+}
+
 export async function scoreArticlesWithAI(
   articles: Article[],
   aiClient: AIClient,
@@ -1704,18 +1865,52 @@ export async function scoreArticlesWithAI(
   );
   if (projects.length === 0) return genericScores;
 
+  const possibleProjectsByIndex = new Map<number, Set<string>>();
+  for (const project of projects) {
+    const matching = indexed.filter(item => articleMightMatchProject(articles[item.index]!, project));
+    const nonResearch = matching.filter(item => articles[item.index]!.sourceTier !== 'research');
+    const research = matching
+      .filter(item => articles[item.index]!.sourceTier === 'research')
+      .sort((a, b) => getGenericScore(genericScores.get(b.index)!) - getGenericScore(genericScores.get(a.index)!))
+      .slice(0, MAX_PROJECT_RESEARCH_CANDIDATES_PER_PROFILE);
+    for (const item of [...nonResearch, ...research]) {
+      const possibleIds = possibleProjectsByIndex.get(item.index) || new Set<string>();
+      possibleIds.add(project.id);
+      possibleProjectsByIndex.set(item.index, possibleIds);
+    }
+  }
   const projectCandidates = indexed.flatMap(item => {
-    const possibleProjectIds = projects
-      .filter(project => articleMightMatchProject(articles[item.index]!, project))
-      .map(project => project.id);
+    const possibleProjectIds = [...(possibleProjectsByIndex.get(item.index) || [])];
     return possibleProjectIds.length > 0 ? [{ ...item, possibleProjectIds }] : [];
   });
-  const referencedProjectIds = new Set(projectCandidates.flatMap(item => item.possibleProjectIds));
-  console.log(`[digest] Project scoring candidates: ${projectCandidates.length}/${articles.length}; relevant profiles=${referencedProjectIds.size}/${projects.length}`);
-  if (projectCandidates.length === 0) return genericScores;
+  const nonResearchProjectCandidates = projectCandidates
+    .filter(item => articles[item.index]!.sourceTier !== 'research');
+  const researchProjectCandidates = projectCandidates
+    .filter(item => articles[item.index]!.sourceTier === 'research')
+    .sort((a, b) => getGenericScore(genericScores.get(b.index)!) - getGenericScore(genericScores.get(a.index)!));
+  const prioritizedResearchIndices = new Set<number>();
+  for (const project of projects) {
+    const bestForProject = researchProjectCandidates.find(item => item.possibleProjectIds?.includes(project.id));
+    if (bestForProject) prioritizedResearchIndices.add(bestForProject.index);
+  }
+  for (const item of researchProjectCandidates) {
+    if (prioritizedResearchIndices.size >= MAX_TOTAL_PROJECT_RESEARCH_CANDIDATES) break;
+    prioritizedResearchIndices.add(item.index);
+  }
+  const cappedProjectCandidates = [
+    ...nonResearchProjectCandidates,
+    ...researchProjectCandidates.filter(item => prioritizedResearchIndices.has(item.index)),
+  ];
+  const referencedProjectIds = new Set(cappedProjectCandidates.flatMap(item => item.possibleProjectIds));
+  console.log(
+    `[digest] Project scoring candidates: ${cappedProjectCandidates.length}/${articles.length}; `
+    + `research=${Math.min(researchProjectCandidates.length, prioritizedResearchIndices.size)}/${researchProjectCandidates.length}; `
+    + `relevant profiles=${referencedProjectIds.size}/${projects.length}`
+  );
+  if (cappedProjectCandidates.length === 0) return genericScores;
 
   const projectScores = await scoreArticlePass(
-    projectCandidates,
+    cappedProjectCandidates,
     articleTextByIndex,
     aiClient,
     projects,
@@ -1727,6 +1922,244 @@ export async function scoreArticlesWithAI(
     if (genericScore) genericScore.projectMatches = projectScore.projectMatches;
   }
   return genericScores;
+}
+
+// ============================================================================
+// Frontier Research Selection
+// ============================================================================
+
+const RESEARCH_PAPER_SIGNAL_REGEX = /\b(?:arxiv|doi|paper|preprint|study|researchers?|benchmark|evaluation|we (?:propose|present|introduce)|experiments?)\b|论文|预印本|研究提出|实验|基准/i;
+const RESEARCH_TOPIC_PATTERNS: Record<string, RegExp> = {
+  llm: /\b(?:llms?|large language models?|language models?|foundation models?|reasoning models?|transformers?)\b/i,
+  agent: /\b(?:ai agents?|llm agents?|agentic|autonomous agents?|multi[ -]agents?|tool[- ]using agents?|computer use)\b/i,
+};
+
+export function isResearchPaperCandidate(
+  article: Pick<Article, 'title' | 'description' | 'link' | 'sourceName' | 'sourceTier' | 'sourceTags'>,
+  topics: string[]
+): boolean {
+  if (article.sourceTier !== 'research' && article.sourceTier !== 'first-party') return false;
+  const text = `${article.sourceName} ${article.title} ${article.description}`;
+  const isArxiv = /(?:^|\.)arxiv\.org$/i.test(getHostname(article.link)) || /arxiv/i.test(article.sourceName);
+  const hasPaperEvidence = isArxiv
+    || article.sourceTags?.includes('research') && RESEARCH_PAPER_SIGNAL_REGEX.test(text)
+    || RESEARCH_PAPER_SIGNAL_REGEX.test(text) && /research|paper|arxiv/i.test(article.sourceName);
+  if (!hasPaperEvidence) return false;
+
+  return topics.some(topic => {
+    const normalizedTopic = topic.trim().toLowerCase();
+    const pattern = RESEARCH_TOPIC_PATTERNS[normalizedTopic];
+    return pattern ? pattern.test(text) : containsConfiguredSignal(text, topic);
+  });
+}
+
+function buildResearchScoringPrompt(
+  articles: Array<{ index: number; title: string; description: string; sourceName: string }>,
+  topics: string[]
+): string {
+  const articleList = articles.map(article =>
+    `Index ${article.index}: [${article.sourceName}] ${article.title}\n${stripHtml(article.description).slice(0, 700)}`
+  ).join('\n\n---\n\n');
+
+  return `你是大模型与 AI Agent 研究编辑。请只依据标题和摘要，评估下列论文或研究内容。
+
+关注主题：${topics.join(', ')}
+
+每项返回 1-10 的整数分：
+- frontierScore：方法、架构、训练、推理、Agent 机制或评测方面的新颖程度；常规应用论文不得高分。
+- evidenceScore：摘要中实验、基线、指标、消融或明确方法证据的充分程度。
+- impactScore：对大模型能力、Agent 架构、安全或工程实践的潜在影响。
+- reproducibilityScore：摘要明确提供代码、模型、数据、详细方法或可复现线索的程度；没有说明时不得推断为开源。
+
+要求：
+1. 不得把机构名气、营销措辞或“首次”等自述直接当作突破证据。
+2. 不得补充摘要未提供的实验结果、代码地址、许可证或引用热度。
+3. whyImportant 用中文说明真正的新意和潜在价值，最多 160 字。
+4. limitations 用中文说明摘要中可见的证据限制；没有明确限制时写“摘要未提供足够的局限性信息”，最多 160 字。
+5. index 必须原样返回，不能按批次重新编号。
+
+待评分内容：
+
+${articleList}
+
+严格返回 JSON，不要包含 markdown：
+{"results":[{"index":0,"frontierScore":8,"evidenceScore":7,"impactScore":8,"reproducibilityScore":6,"whyImportant":"...","limitations":"..."}]}`;
+}
+
+function validateResearchAssessment(
+  value: unknown,
+  allowedIndices: Set<number>
+): { index: number; assessment: ResearchAssessment } | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const index = typeof record.index === 'number'
+    ? record.index
+    : typeof record.index === 'string' && /^\d+$/.test(record.index.trim())
+      ? Number(record.index)
+      : NaN;
+  if (!Number.isInteger(index) || !allowedIndices.has(index)) return null;
+  const whyImportant = truncateText(record.whyImportant);
+  if (!whyImportant) return null;
+
+  return {
+    index,
+    assessment: {
+      frontierScore: clampScore(record.frontierScore),
+      evidenceScore: clampScore(record.evidenceScore),
+      impactScore: clampScore(record.impactScore),
+      reproducibilityScore: clampScore(record.reproducibilityScore),
+      whyImportant,
+      limitations: truncateText(record.limitations) || '摘要未提供足够的局限性信息。',
+    },
+  };
+}
+
+async function scoreResearchCandidates<T extends RankableArticle>(
+  articles: T[],
+  allArticles: T[],
+  aiClient: AIClient,
+  policy: ResearchPolicy
+): Promise<Map<T, ResearchAssessment>> {
+  const indexByArticle = new Map(allArticles.map((article, index) => [article, index]));
+  const indexed = articles.map(article => ({
+    index: indexByArticle.get(article)!,
+    title: article.title,
+    description: article.description,
+    sourceName: article.sourceName,
+  }));
+  const assessments = new Map<T, ResearchAssessment>();
+  const articleByIndex = new Map(indexed.map((item, index) => [item.index, articles[index]!]));
+  const batches: typeof indexed[] = [];
+  for (let i = 0; i < indexed.length; i += SCORING_BATCH_SIZE) {
+    batches.push(indexed.slice(i, i + SCORING_BATCH_SIZE));
+  }
+  console.log(`[digest] Research AI scoring: ${indexed.length} candidates in ${batches.length} batches`);
+
+  for (let i = 0; i < batches.length; i += MAX_CONCURRENT_GEMINI) {
+    const batchGroup = batches.slice(i, i + MAX_CONCURRENT_GEMINI);
+    await Promise.all(batchGroup.map(async batch => {
+      const allowedIndices = new Set(batch.map(item => item.index));
+      const prompt = buildResearchScoringPrompt(batch, policy.topics);
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= SCORING_MAX_ATTEMPTS; attempt++) {
+        try {
+          const responseText = await aiClient.call(prompt, 'research-scoring');
+          const parsed = parseJsonResponse<GeminiScoringResult>(responseText);
+          if (!Array.isArray(parsed.results)) throw new Error('Research response does not contain a results array');
+          const batchResults = new Map<number, ResearchAssessment>();
+          for (const raw of parsed.results) {
+            const result = validateResearchAssessment(raw, allowedIndices);
+            if (result) batchResults.set(result.index, result.assessment);
+          }
+          if (batchResults.size !== batch.length) {
+            throw new Error(`Research response returned ${batchResults.size}/${batch.length} valid result(s)`);
+          }
+          for (const [index, assessment] of batchResults) {
+            const article = articleByIndex.get(index);
+            if (article) assessments.set(article, assessment);
+          }
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt < SCORING_MAX_ATTEMPTS) {
+            console.warn(`[digest] Research scoring attempt ${attempt}/${SCORING_MAX_ATTEMPTS} failed (${error instanceof Error ? error.message : String(error)}); retrying once`);
+          }
+        }
+      }
+      console.warn(`[digest] Research scoring batch omitted after ${SCORING_MAX_ATTEMPTS} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+    }));
+    console.log(`[digest] Research scoring progress: ${Math.min(i + MAX_CONCURRENT_GEMINI, batches.length)}/${batches.length} batches`);
+  }
+  return assessments;
+}
+
+interface ResearchCandidate<T> {
+  article: T;
+  assessment: ResearchAssessment;
+  attentionScore: number;
+  attentionSignals: string[];
+}
+
+function getResearchAttention<T extends RankableArticle>(
+  article: T,
+  allArticles: T[],
+  trendingRepos: TrendingRepo[]
+): { score: number; signals: string[] } {
+  const sourceMentions = new Set(
+    allArticles.filter(candidate => isSameDigestEvent(article, candidate)).map(getSourceChannelIdentity)
+  ).size;
+  const titleTokens = tokenizeEventText(article.title);
+  const trendingMatch = trendingRepos.some(repo => {
+    const repoTokens = tokenizeEventText(`${repo.name} ${repo.description}`);
+    const shared = [...titleTokens].filter(token => repoTokens.has(token) && !EVENT_GENERIC_TOKENS.has(token));
+    return shared.length >= 2 && shared.some(token => token.length >= 5);
+  });
+  let score = 1;
+  const signals: string[] = ['研究论文源'];
+  if (sourceMentions >= 2) {
+    score += Math.min(4, (sourceMentions - 1) * 2);
+    signals.push(`${sourceMentions} 个独立来源提及`);
+  }
+  if (trendingMatch) {
+    score += 3;
+    signals.push('关联 GitHub Trending');
+  }
+  if (article.genericScore >= 24) {
+    score += 2;
+    signals.push('通用评分高');
+  } else if (article.genericScore >= 21) {
+    score += 1;
+  }
+  return { score: Math.min(10, score), signals };
+}
+
+export async function selectResearchIntelligenceCandidates<T extends RankableArticle>(
+  articles: T[],
+  aiClient: AIClient,
+  policy: ResearchPolicy,
+  trendingRepos: TrendingRepo[],
+  recentHistory: DigestHistoryEntry[] = []
+): Promise<Array<ResearchCandidate<T>>> {
+  if (!policy.enabled || policy.maxItems <= 0) return [];
+  const prefiltered = deduplicateRankedEvents(articles)
+    .filter(article => isResearchPaperCandidate(article, policy.topics))
+    .sort(compareGenericRank)
+    .slice(0, policy.candidateLimit);
+  console.log(`[digest] Research candidates: ${prefiltered.length}/${articles.length} after paper/topic prefilter (limit ${policy.candidateLimit})`);
+  if (prefiltered.length === 0) return [];
+
+  const attentionByArticle = new Map(prefiltered.map(article => [
+    article,
+    getResearchAttention(article, articles, trendingRepos),
+  ] as const));
+  const attentionQualified = prefiltered.filter(article =>
+    attentionByArticle.get(article)!.score >= policy.minAttentionScore
+  );
+  console.log(`[digest] Research attention prefilter: ${attentionQualified.length}/${prefiltered.length} meet score >= ${policy.minAttentionScore}`);
+  if (attentionQualified.length === 0) return [];
+
+  const assessments = await scoreResearchCandidates(attentionQualified, articles, aiClient, policy);
+  const evaluated = attentionQualified.flatMap(article => {
+    const assessment = assessments.get(article);
+    if (!assessment) return [];
+    const attention = attentionByArticle.get(article)!;
+    return [{ article, assessment, attentionScore: attention.score, attentionSignals: attention.signals }];
+  });
+  const qualified = evaluated.filter(candidate =>
+    candidate.assessment.frontierScore >= policy.minFrontierScore
+    && candidate.assessment.evidenceScore >= policy.minEvidenceScore
+  );
+  const fresh = qualified.filter(candidate => !appearedInRecentDigest(candidate.article, recentHistory));
+  const selected = fresh.sort((a, b) =>
+    b.assessment.frontierScore * 2 + b.assessment.evidenceScore + b.assessment.impactScore + b.assessment.reproducibilityScore + b.attentionScore
+    - (a.assessment.frontierScore * 2 + a.assessment.evidenceScore + a.assessment.impactScore + a.assessment.reproducibilityScore + a.attentionScore)
+    || b.article.pubDate.getTime() - a.article.pubDate.getTime()
+  ).slice(0, policy.maxItems);
+  console.log(
+    `[digest] Research intelligence: evaluated=${evaluated.length}, qualified=${qualified.length}, `
+    + `cooldown=${qualified.length - fresh.length}, selected=${selected.length}`
+  );
+  return selected;
 }
 
 // ============================================================================
@@ -1786,7 +2219,7 @@ ${articlesList}
 }`;
 }
 
-const LOW_INFORMATION_SUMMARY_REGEX = /\[信息不足\]|(?:文章|本文|该文|作者)(?:可能|或许|似乎|大概)(?:会|将|还会|进一步|主要)?(?:涉及|讨论|分析|探讨|介绍|包括|聚焦)|(?:may|might|could) (?:discuss|cover|analy[sz]e|explore|include)|(?:信息|细节|原文)(?:不足|有限|未提供|未说明)|insufficient (?:information|detail)|details? (?:are|were) not (?:provided|available)/i;
+const LOW_INFORMATION_SUMMARY_REGEX = /\[信息不足\]|(?:文章|本文|该文|作者)(?:可能|或许|似乎|大概)(?:会|将|还会|进一步|主要)?(?:涉及|讨论|分析|探讨|介绍|包括|聚焦)|(?:文章|本文|该文).{0,30}(?:可能|或许|似乎|大概)(?:会|将|还会|进一步|主要)?(?:涉及|讨论|分析|探讨|介绍|包括|聚焦)|(?:具体)?(?:内容|信息|细节|原文)(?:不足|有限|未(?:在摘要中)?(?:提供|说明|详细说明))|(?:may|might|could) (?:discuss|cover|analy[sz]e|explore|include)|insufficient (?:information|detail)|details? (?:are|were) not (?:provided|available)/i;
 
 export function isLowInformationGeneratedSummary(summary: Pick<ArticleSummary, 'summary' | 'reason'>): boolean {
   return !summary.reason.trim() || LOW_INFORMATION_SUMMARY_REGEX.test(`${summary.summary} ${summary.reason}`);
@@ -2074,10 +2507,6 @@ function renderDesignSection(designArticles: DesignArticle[]): string {
   return section;
 }
 
-function getBestProjectMatch(article: { breakdown: ArticleScore }): ProjectMatch | undefined {
-  return article.breakdown.projectMatches[0];
-}
-
 function getGenericScore(score: ArticleScore): number {
   return score.relevance + score.quality + score.timeliness;
 }
@@ -2148,29 +2577,11 @@ function getAdjustedGenericScore(article: { title: string; description: string; 
   return article.genericScore + getGenericRankingAdjustment(article);
 }
 
-function getAdjustedProjectAwareScore(article: { title: string; description: string; sourceTier?: SourceTier; projectAwareScore: number }): number {
-  return article.projectAwareScore + getGenericRankingAdjustment(article);
-}
-
 function compareGenericRank(
   a: { title: string; description: string; sourceTier?: SourceTier; genericScore: number; pubDate: Date },
   b: { title: string; description: string; sourceTier?: SourceTier; genericScore: number; pubDate: Date }
 ): number {
   return getAdjustedGenericScore(b) - getAdjustedGenericScore(a)
-    || b.genericScore - a.genericScore
-    || b.pubDate.getTime() - a.pubDate.getTime();
-}
-
-function compareProjectRank(
-  a: { breakdown: ArticleScore; projectAwareScore: number; genericScore: number; pubDate: Date },
-  b: { breakdown: ArticleScore; projectAwareScore: number; genericScore: number; pubDate: Date }
-): number {
-  const bestA = getBestProjectMatch(a);
-  const bestB = getBestProjectMatch(b);
-  return (bestB?.projectRelevance || 0) - (bestA?.projectRelevance || 0)
-    || (bestB?.actionability || 0) - (bestA?.actionability || 0)
-    || b.projectAwareScore - a.projectAwareScore
-    || getAdjustedGenericScore(b) - getAdjustedGenericScore(a)
     || b.genericScore - a.genericScore
     || b.pubDate.getTime() - a.pubDate.getTime();
 }
@@ -2197,7 +2608,7 @@ type RankableArticle = {
 function compareEventRepresentatives<T extends RankableArticle>(a: T, b: T): number {
   return getSourceAuthorityScore(b) - getSourceAuthorityScore(a)
     || b.breakdown.quality - a.breakdown.quality
-    || b.projectAwareScore - a.projectAwareScore
+    || getAdjustedGenericScore(b) - getAdjustedGenericScore(a)
     || b.genericScore - a.genericScore
     || b.pubDate.getTime() - a.pubDate.getTime();
 }
@@ -2210,14 +2621,18 @@ function titlesDescribeSameEvent(titleAValue: string, titleBValue: string): bool
 
   const normalizedA = normalizeSignalText(titleAValue);
   const normalizedB = normalizeSignalText(titleBValue);
+  const sharedDistinctiveTokens = [...titleA]
+    .filter(token => titleB.has(token) && !EVENT_GENERIC_TOKENS.has(token));
+  if (sharedDistinctiveTokens.length >= 3 && sharedDistinctiveTokens.some(token => token.length >= 8)) {
+    return true;
+  }
+
   const sameAction = EVENT_ACTION_GROUPS.some(group =>
     group.some(action => normalizedA.includes(` ${action} `))
     && group.some(action => normalizedB.includes(` ${action} `))
   );
   if (!sameAction) return false;
 
-  const sharedDistinctiveTokens = [...titleA]
-    .filter(token => titleB.has(token) && !EVENT_GENERIC_TOKENS.has(token));
   return sharedDistinctiveTokens.length >= 2 && overlapCoefficient(titleA, titleB) >= 0.5;
 }
 
@@ -2314,6 +2729,7 @@ function logTopSourceDistribution(articles: RankableArticle[]): void {
 }
 
 function applySourceTopLimits<T extends RankableArticle>(articles: T[], topN: number): T[] {
+  if (topN <= 0) return [];
   const selected: T[] = [];
   const deferred: T[] = [];
   const sourceCounts = new Map<string, number>();
@@ -2334,12 +2750,50 @@ function applySourceTopLimits<T extends RankableArticle>(articles: T[], topN: nu
   return selected.length > 0 ? selected : articles.slice(0, Math.min(1, topN));
 }
 
+interface RankArticlesOptions<T extends RankableArticle> {
+  prioritizedProjectArticles?: T[];
+  prioritizedResearchArticles?: T[];
+  qualifiedProjectMatches?: Map<T, ProjectMatch[]>;
+  includeGeneric?: boolean;
+  genericMaxItems?: number;
+}
+
 export function rankArticles<T extends RankableArticle>(
   articles: T[],
   topN: number,
-  recentHistory: DigestHistoryEntry[] = []
+  recentHistory: DigestHistoryEntry[] = [],
+  options: RankArticlesOptions<T> = {}
 ): T[] {
-  const uniqueArticles = deduplicateRankedEvents(articles);
+  if (topN <= 0) return [];
+
+  const prioritizedProjectArticles = deduplicateRankedEvents(options.prioritizedProjectArticles || [])
+    .sort((a, b) => {
+      const matchesA = options.qualifiedProjectMatches?.get(a) || [];
+      const matchesB = options.qualifiedProjectMatches?.get(b) || [];
+      const bestA = [...matchesA].sort((x, y) =>
+        y.projectRelevance - x.projectRelevance || y.actionability - x.actionability
+      )[0];
+      const bestB = [...matchesB].sort((x, y) =>
+        y.projectRelevance - x.projectRelevance || y.actionability - x.actionability
+      )[0];
+      return (bestB?.projectRelevance || 0) - (bestA?.projectRelevance || 0)
+        || (bestB?.actionability || 0) - (bestA?.actionability || 0)
+        || getAdjustedGenericScore(b) - getAdjustedGenericScore(a)
+        || b.genericScore - a.genericScore
+        || b.pubDate.getTime() - a.pubDate.getTime();
+    })
+    .slice(0, topN);
+  const prioritizedResearchArticles = deduplicateRankedEvents(options.prioritizedResearchArticles || [])
+    .filter(article => !prioritizedProjectArticles.some(priority => isSameDigestEvent(article, priority)))
+    .slice(0, Math.max(0, topN - prioritizedProjectArticles.length));
+  const genericQuota = Math.max(0, (options.genericMaxItems ?? topN) - prioritizedResearchArticles.length);
+  const genericLimit = options.includeGeneric === false
+    ? 0
+    : Math.min(genericQuota, topN - prioritizedProjectArticles.length - prioritizedResearchArticles.length);
+  const genericPool = articles
+    .filter(article => !prioritizedProjectArticles.some(priority => isSameDigestEvent(article, priority)))
+    .filter(article => !prioritizedResearchArticles.some(priority => isSameDigestEvent(article, priority)));
+  const uniqueArticles = deduplicateRankedEvents(genericPool);
   const sourceGroups = new Map<string, T[]>();
   for (const article of uniqueArticles) {
     const identity = getSourceChannelIdentity(article);
@@ -2350,24 +2804,7 @@ export function rankArticles<T extends RankableArticle>(
   const sourceLimitedNames = new Set([...sourceGroups.entries()]
     .filter(([, sourceArticles]) => sourceArticles.length > getSourceTopLimit(sourceArticles[0]!))
     .map(([identity]) => identity));
-  const matched = uniqueArticles.filter(article => article.breakdown.projectMatches.length > 0);
-  let ordered: T[];
-
-  if (matched.length >= 3) {
-    const matchedFirst = [...matched].sort(compareProjectRank);
-    const unmatched = uniqueArticles
-      .filter(article => article.breakdown.projectMatches.length === 0)
-      .sort(compareGenericRank);
-    ordered = [...matchedFirst, ...unmatched];
-  } else {
-    ordered = [...uniqueArticles].sort((a, b) =>
-      getAdjustedProjectAwareScore(b) - getAdjustedProjectAwareScore(a)
-      || getAdjustedGenericScore(b) - getAdjustedGenericScore(a)
-      || b.projectAwareScore - a.projectAwareScore
-      || b.genericScore - a.genericScore
-      || b.pubDate.getTime() - a.pubDate.getTime()
-    );
-  }
+  const ordered = [...uniqueArticles].sort(compareGenericRank);
 
   const fresh = ordered.filter(article => !appearedInRecentDigest(article, recentHistory));
   const coolingDown = ordered.filter(article => appearedInRecentDigest(article, recentHistory));
@@ -2377,23 +2814,26 @@ export function rankArticles<T extends RankableArticle>(
   const traceableSecondary = uniqueArticles.filter(article => assessVerificationStatus(article) === 'traceable-secondary').length;
   const unverified = uniqueArticles.filter(article => assessVerificationStatus(article) === 'unverified').length;
   console.log(
-    `[digest] Top ranking controls: uniqueEvents=${uniqueArticles.length}/${articles.length}, `
-    + `duplicates=${articles.length - uniqueArticles.length}, cooldownCandidates=${coolingDown.length}, `
+    `[digest] Top ranking controls: projectPriority=${prioritizedProjectArticles.length}, researchPriority=${prioritizedResearchArticles.length}, `
+    + `genericUniqueEvents=${uniqueArticles.length}/${genericPool.length}, `
+    + `duplicates=${genericPool.length - uniqueArticles.length}, cooldownCandidates=${coolingDown.length}, `
     + `firstPartyBoosted=${firstPartyBoosted}, lowInformationPenalized=${lowInformationPenalized}, `
     + `secondary=${secondary}, traceableSecondary=${traceableSecondary}, unverified=${unverified}, `
     + `sourceCaps=${[...sourceLimitedNames].join(', ') || 'none'}`
   );
-  const selected = applySourceTopLimits(fresh, topN);
-  if (selected.length >= topN || coolingDown.length === 0) {
+  const selectedGeneric = applySourceTopLimits(fresh, genericLimit);
+  if (selectedGeneric.length >= genericLimit || coolingDown.length === 0) {
+    const selected = [...prioritizedProjectArticles, ...prioritizedResearchArticles, ...selectedGeneric].slice(0, topN);
     logTopSourceDistribution(selected);
     return selected;
   }
 
-  const selectedSet = new Set(selected);
-  const withBackfill = applySourceTopLimits(
-    [...selected, ...coolingDown.filter(article => !selectedSet.has(article))],
-    topN
+  const selectedSet = new Set(selectedGeneric);
+  const genericWithBackfill = applySourceTopLimits(
+    [...selectedGeneric, ...coolingDown.filter(article => !selectedSet.has(article))],
+    genericLimit
   );
+  const withBackfill = [...prioritizedProjectArticles, ...prioritizedResearchArticles, ...genericWithBackfill].slice(0, topN);
   logTopSourceDistribution(withBackfill);
   return withBackfill;
 }
@@ -2464,6 +2904,16 @@ export function extractProjectDigestHistory(markdown: string): DigestHistoryEntr
   return [...entries.values()];
 }
 
+export function extractResearchDigestHistory(markdown: string): DigestHistoryEntry[] {
+  const section = markdown.match(/## 📚 前沿论文与研究\s*\n([\s\S]*?)(?:\n---\s*\n|$)/)?.[1] || '';
+  const entries = new Map<string, DigestHistoryEntry>();
+  for (const match of section.matchAll(/^### \[([^\]]+)]\((https?:\/\/[^)\s]+)\)/gm)) {
+    const entry = { title: match[1]!.trim(), link: match[2]!.trim() };
+    entries.set(normalizeArticleUrl(entry.link), entry);
+  }
+  return [...entries.values()];
+}
+
 async function loadRecentHistory(
   outputPath: string,
   extractor: (markdown: string) => DigestHistoryEntry[],
@@ -2504,6 +2954,10 @@ export async function loadRecentProjectDigestHistory(outputPath: string, now = n
   return loadRecentHistory(outputPath, extractProjectDigestHistory, 'project digest', now, ignoreCurrentOutput);
 }
 
+export async function loadRecentResearchDigestHistory(outputPath: string, now = new Date(), ignoreCurrentOutput = false): Promise<DigestHistoryEntry[]> {
+  return loadRecentHistory(outputPath, extractResearchDigestHistory, 'research digest', now, ignoreCurrentOutput);
+}
+
 interface ProjectIntelligenceCandidate<T> {
   article: T;
   matches: ProjectMatch[];
@@ -2524,7 +2978,13 @@ function tokenizeEventText(value: string): Set<string> {
 
   return new Set(normalized
     .split(/\s+/)
-    .map(token => token === 'agents' ? 'agent' : token === 'models' ? 'model' : token === 'systems' ? 'system' : token)
+    .map(token => {
+      if (token === 'agents') return 'agent';
+      if (token === 'models') return 'model';
+      if (token === 'systems') return 'system';
+      if (token.length > 4 && token.endsWith('s') && !/(ss|is|us)$/.test(token)) return token.slice(0, -1);
+      return token;
+    })
     .filter(token => token.length >= 3 && !EVENT_STOP_WORDS.has(token)));
 }
 
@@ -2727,6 +3187,34 @@ export function renderProjectIntelligenceSection(articles: ScoredArticle[], proj
   return section;
 }
 
+export function renderResearchIntelligenceSection(
+  articles: ResearchIntelligenceArticle[],
+  topArticles: ScoredArticle[]
+): string {
+  if (articles.length === 0) return '';
+  const topUrls = new Set(topArticles.map(article => normalizeArticleUrl(article.link)));
+  let section = `## 📚 前沿论文与研究\n\n`;
+  section += `> 聚焦大模型与 AI Agent，综合前沿性、实验证据、潜在影响和跨来源关注动量筛选。\n\n`;
+
+  for (const article of articles) {
+    const inTop = topUrls.has(normalizeArticleUrl(article.link));
+    const assessment = article.researchAssessment;
+    section += `### [${article.titleZh || article.title}](${article.link})\n\n`;
+    if (inTop) section += `> **状态**：本期 Top ${topArticles.length} 已收录\n\n`;
+    if (!inTop) section += `${article.summary}\n\n`;
+    section += `- **前沿性**：${assessment.frontierScore}/10\n`;
+    section += `- **证据质量**：${assessment.evidenceScore}/10\n`;
+    section += `- **潜在影响**：${assessment.impactScore}/10\n`;
+    section += `- **可复现性**：${assessment.reproducibilityScore}/10\n`;
+    section += `- **关注动量**：${article.attentionScore}/10 · ${article.attentionSignals.join(' · ')}\n`;
+    section += `- **研究价值**：${assessment.whyImportant}\n`;
+    section += `- **证据限制**：${assessment.limitations}\n`;
+    section += `- **来源**：${article.sourceName}\n\n`;
+  }
+  section += `---\n\n`;
+  return section;
+}
+
 export function renderSupplementalViewsSection(articles: ScoredArticle[], topArticleCount: number): string {
   if (articles.length === 0) return '';
 
@@ -2757,18 +3245,19 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
   filteredArticles: number;
   hours: number;
   lang: string;
-}, clawfeedContent: string, trendingRepos: TrendingRepo[], designArticles: DesignArticle[], projects: ProjectConfig[], projectArticles: ScoredArticle[], supplementalArticles: ScoredArticle[]): string {
+}, clawfeedContent: string, trendingRepos: TrendingRepo[], designArticles: DesignArticle[], projects: ProjectConfig[], projectArticles: ScoredArticle[], researchArticles: ResearchIntelligenceArticle[], supplementalArticles: ScoredArticle[]): string {
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
   const hasProjectProfiles = projects.length > 0;
   const hasDesignIntelligence = designArticles.length > 0;
   const hasSupplementalViews = supplementalArticles.length > 0;
+  const hasResearchIntelligence = researchArticles.length > 0;
 
   let report = `# 📰 AI 资讯每日精选 — ${dateStr}\n\n`;
   report += `> 汇聚 ${stats.totalFeeds}+ 技术博客、X/Twitter、Hacker News、Reddit、Product Hunt、\n`;
   report += `> Lobste.rs、ClawFeed 日报及 GitHub Trending，经 AI 评分筛选。\n`;
   report += `>\n`;
-  report += `> **本期内容**：🏆 今日必读 · 🌐 ClawFeed 日报 · 🔥 GitHub Trending · 📂 分类精选${hasDesignIntelligence ? ' · 🎨 设计与生成式 AI' : ''} · 📊 数据概览${hasProjectProfiles ? ' · 🎯 项目相关情报' : ''}${hasSupplementalViews ? ' · 🌍 补充视角' : ''}\n\n`;
+  report += `> **本期内容**：🏆 今日必读 · 🌐 ClawFeed 日报 · 🔥 GitHub Trending · 📂 分类精选${hasDesignIntelligence ? ' · 🎨 设计与生成式 AI' : ''} · 📊 数据概览${hasProjectProfiles ? ' · 🎯 项目相关情报' : ''}${hasResearchIntelligence ? ' · 📚 前沿论文与研究' : ''}${hasSupplementalViews ? ' · 🌍 补充视角' : ''}\n\n`;
 
   // ── Today's Highlights ──
   if (highlights) {
@@ -2892,6 +3381,8 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
 
   report += renderProjectIntelligenceSection(projectArticles, projects, articles);
 
+  report += renderResearchIntelligenceSection(researchArticles, articles);
+
   report += renderSupplementalViewsSection(supplementalArticles, articles.length);
 
   // ── Footer ──
@@ -2924,9 +3415,10 @@ Environment:
   OPENAI_MODEL     Optional OpenAI-compatible model (default: deepseek-v4-flash for DeepSeek base, else gpt-4o-mini)
   AI_PRIMARY_PROVIDER Preferred provider: gemini, openai, or deepseek (default: gemini)
   AI_REQUEST_TIMEOUT_MS Per-request timeout in milliseconds (default: 180000)
-  DEEPSEEK_THINKING_TASKS Comma-separated tasks: project-scoring,summary,highlights,design; all or none (default: project-scoring,highlights)
+  DEEPSEEK_THINKING_TASKS Comma-separated tasks: project-scoring,research-scoring,summary,highlights,design; all or none (default: project-scoring,highlights)
   DESIGN_SECTION_ENABLED Enable the legacy Design & Generative AI section and its AI request (default: false)
   DIGEST_IGNORE_SAME_DAY_COOLDOWN Ignore the current output file when loading 48h history (default: false)
+  DIGEST_GENERIC_MODE Generic ranking mode: config, include, or project-only (default: config)
   RSSHUB_BASE_URL  RSSHub instance URL for X/Twitter feeds (default: https://rsshub.app)
   X_ACCOUNTS       Comma-separated X/Twitter accounts to follow (e.g. karpathy,sama,ylecun)
   PROJECTS_CONFIG_PATH Optional project profile JSON path (default: config/projects.json)
@@ -3013,10 +3505,20 @@ async function main(): Promise<void> {
   }
   console.log('');
 
-  const [projects, configuredSources] = await Promise.all([
+  const [projectConfig, configuredSources] = await Promise.all([
     loadProjects(),
     loadConfiguredSources(),
   ]);
+  const { projects, researchPolicy } = projectConfig;
+  const digestPolicy = resolveDigestPolicy(projectConfig.digestPolicy);
+  console.log(
+    `[digest] Ranking policy: project-first; generic=${digestPolicy.includeGeneric ? 'enabled' : 'disabled'}`
+    + `${digestPolicy.includeGeneric ? ` (max ${digestPolicy.genericMaxItems})` : ''}`
+  );
+  console.log(
+    `[digest] Research policy: ${researchPolicy.enabled ? researchPolicy.mode : 'disabled'}`
+    + `${researchPolicy.enabled ? ` (max ${researchPolicy.maxItems}, candidates ${researchPolicy.candidateLimit})` : ''}`
+  );
 
   const xFeeds = buildXFeeds();
   const allFeeds = mergeFeedSources(RSS_FEEDS, configuredSources, xFeeds);
@@ -3048,10 +3550,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   
-  console.log(`[digest] Step 3/5: AI scoring ${recentArticles.length} articles...`);
-  const scores = await scoreArticlesWithAI(recentArticles, aiClient, projects);
+  const scoringArticles = selectArticlesForAIScoring(recentArticles, projects, researchPolicy);
+  console.log(`[digest] Step 3/5: AI scoring ${scoringArticles.length} articles...`);
+  const scores = await scoreArticlesWithAI(scoringArticles, aiClient, projects);
   
-  const scoredArticles = recentArticles.map((article, index) => {
+  const scoredArticles = scoringArticles.map((article, index) => {
     const score = scores.get(index) || { relevance: 5, quality: 5, timeliness: 5, category: 'other' as CategoryId, keywords: [], projectMatches: [] };
     const genericScore = getGenericScore(score);
     const projectAwareScore = getProjectAwareScore(score);
@@ -3069,9 +3572,10 @@ async function main(): Promise<void> {
     console.log(`[digest] Project-matched articles: ${projectMatchedCount}/${scoredArticles.length}`);
   }
 
-  const [recentDigestHistory, recentProjectDigestHistory] = await Promise.all([
+  const [recentDigestHistory, recentProjectDigestHistory, recentResearchDigestHistory] = await Promise.all([
     loadRecentDigestHistory(outputPath, new Date(), IGNORE_SAME_DAY_COOLDOWN),
     loadRecentProjectDigestHistory(outputPath, new Date(), IGNORE_SAME_DAY_COOLDOWN),
+    loadRecentResearchDigestHistory(outputPath, new Date(), IGNORE_SAME_DAY_COOLDOWN),
   ]);
   if (IGNORE_SAME_DAY_COOLDOWN) {
     console.log('[digest] Same-day cooldown: current output ignored for full manual regeneration');
@@ -3082,14 +3586,56 @@ async function main(): Promise<void> {
   if (recentProjectDigestHistory.length > 0) {
     console.log(`[digest] Recent project cooldown: ${recentProjectDigestHistory.length} project article(s) loaded from the last ${DIGEST_COOLDOWN_HOURS}h`);
   }
-  const rankedArticles = rankArticles(
-    scoredArticles,
-    Math.min(scoredArticles.length, topN + MAX_SUMMARY_REPLACEMENT_CANDIDATES),
-    recentDigestHistory
-  );
-  let topArticles = rankedArticles.slice(0, topN);
-  const replacementCandidates = rankedArticles.slice(topN);
+  if (recentResearchDigestHistory.length > 0) {
+    console.log(`[digest] Recent research cooldown: ${recentResearchDigestHistory.length} paper(s) loaded from the last ${DIGEST_COOLDOWN_HOURS}h`);
+  }
   const projectCandidates = selectProjectIntelligenceCandidates(scoredArticles, projects, recentProjectDigestHistory);
+  const effectiveResearchPolicy: ResearchPolicy = {
+    ...researchPolicy,
+    enabled: researchPolicy.enabled && digestPolicy.includeGeneric,
+  };
+  const researchCandidates = await selectResearchIntelligenceCandidates(
+    scoredArticles,
+    aiClient,
+    effectiveResearchPolicy,
+    trendingRepos,
+    recentResearchDigestHistory
+  );
+  const prioritizedProjectArticles = projectCandidates.map(candidate => candidate.article);
+  const prioritizedResearchArticles = researchPolicy.mode === 'hybrid' || researchPolicy.mode === 'replace-generic'
+    ? researchCandidates.map(candidate => candidate.article)
+    : [];
+  const qualifiedMatchesByArticle = new Map(
+    projectCandidates.map(({ article, matches }) => [article, matches] as const)
+  );
+  const rankingPool = researchPolicy.mode === 'section'
+    ? scoredArticles.filter(article => !researchCandidates.some(candidate => isSameDigestEvent(article, candidate.article)))
+    : scoredArticles;
+  let topArticles = rankArticles(
+    rankingPool,
+    Math.min(scoredArticles.length, topN),
+    recentDigestHistory,
+    {
+      prioritizedProjectArticles,
+      prioritizedResearchArticles,
+      qualifiedProjectMatches: qualifiedMatchesByArticle,
+      includeGeneric: digestPolicy.includeGeneric,
+      genericMaxItems: digestPolicy.genericMaxItems,
+    }
+  );
+  const replacementPool = scoredArticles.filter(article =>
+    !topArticles.some(selected => isSameDigestEvent(article, selected))
+    && !prioritizedProjectArticles.some(selected => isSameDigestEvent(article, selected))
+    && !researchCandidates.some(candidate => isSameDigestEvent(article, candidate.article))
+  );
+  const replacementCandidates = digestPolicy.includeGeneric
+    ? rankArticles(
+      replacementPool,
+      Math.min(replacementPool.length, MAX_SUMMARY_REPLACEMENT_CANDIDATES),
+      recentDigestHistory,
+      { includeGeneric: true, genericMaxItems: MAX_SUMMARY_REPLACEMENT_CANDIDATES }
+    )
+    : [];
   
   console.log(`[digest] Step 4/5: Generating AI summaries...`);
   const summaryArticles = [...topArticles];
@@ -3099,8 +3645,13 @@ async function main(): Promise<void> {
     summaryArticleSet.add(article);
     summaryArticles.push(article);
   }
-  const additionalProjectSummaries = summaryArticles.length - topArticles.length;
-  console.log(`[digest] Project intelligence: ${projectCandidates.length} unique articles, ${additionalProjectSummaries} additional summaries outside Top ${topN}`);
+  for (const { article } of researchCandidates) {
+    if (summaryArticleSet.has(article)) continue;
+    summaryArticleSet.add(article);
+    summaryArticles.push(article);
+  }
+  const additionalIntelligenceSummaries = summaryArticles.length - topArticles.length;
+  console.log(`[digest] Project/research intelligence: ${projectCandidates.length}/${researchCandidates.length} unique articles, ${additionalIntelligenceSummaries} additional summaries outside Top ${topN}`);
 
   const summaryIndexByArticle = new Map(summaryArticles.map((article, index) => [article, index]));
   const indexedSummaryArticles = summaryArticles.map((article, index) => ({ ...article, index }));
@@ -3127,17 +3678,31 @@ async function main(): Promise<void> {
   const rejectedTopArticles = topArticles.filter(article => !hasUsableSummary(article));
   if (rejectedTopArticles.length > 0) {
     console.warn(`[digest] Post-summary quality gate: demoting ${rejectedTopArticles.length} low-information Top article(s)`);
+    const rejectedSet = new Set(rejectedTopArticles);
+    const retainedTopArticles = topArticles.filter(article => !rejectedSet.has(article));
+    const retainedProjectCount = retainedTopArticles
+      .filter(article => qualifiedMatchesByArticle.has(article)).length;
+    const retainedResearchCount = retainedTopArticles
+      .filter(article => researchCandidates.some(candidate => candidate.article === article)).length;
+    const retainedGenericCount = retainedTopArticles.length - retainedProjectCount - retainedResearchCount;
+    const maxGenericForFinal = Math.min(
+      Math.max(0, digestPolicy.genericMaxItems - retainedResearchCount),
+      Math.max(0, topN - retainedProjectCount - retainedResearchCount)
+    );
+    const genericReplacementCapacity = digestPolicy.includeGeneric
+      ? Math.max(0, maxGenericForFinal - retainedGenericCount)
+      : 0;
+    const replacementTarget = Math.min(rejectedTopArticles.length, genericReplacementCapacity);
     const replacementAttempts = replacementCandidates.slice(
       0,
-      Math.min(MAX_SUMMARY_REPLACEMENT_CANDIDATES, rejectedTopArticles.length * 2)
+      Math.min(MAX_SUMMARY_REPLACEMENT_CANDIDATES, replacementTarget * 2)
     );
     await summarizeAdditionalArticles(replacementAttempts);
     const acceptedReplacements = replacementAttempts
       .filter(hasUsableSummary)
-      .slice(0, rejectedTopArticles.length);
-    const rejectedSet = new Set(rejectedTopArticles);
+      .slice(0, replacementTarget);
     topArticles = [
-      ...topArticles.filter(article => !rejectedSet.has(article)),
+      ...retainedTopArticles,
       ...acceptedReplacements,
     ];
     console.log(
@@ -3146,11 +3711,26 @@ async function main(): Promise<void> {
     );
   }
 
+  const qualityApprovedProjectCandidates = projectCandidates.filter(({ article }) => hasUsableSummary(article));
+  if (qualityApprovedProjectCandidates.length < projectCandidates.length) {
+    console.warn(
+      `[digest] Post-summary quality gate: omitting ${projectCandidates.length - qualityApprovedProjectCandidates.length} `
+      + `low-information project article(s)`
+    );
+  }
+  const qualityApprovedResearchCandidates = researchCandidates.filter(({ article }) => hasUsableSummary(article));
+  if (qualityApprovedResearchCandidates.length < researchCandidates.length) {
+    console.warn(
+      `[digest] Post-summary quality gate: omitting ${researchCandidates.length - qualityApprovedResearchCandidates.length} `
+      + `low-information research article(s)`
+    );
+  }
+
   const supplementalCandidates = selectSupplementalViewCandidates(
     scoredArticles,
     topArticles,
     recentDigestHistory,
-    [...topArticles, ...projectCandidates.map(candidate => candidate.article), ...rejectedTopArticles]
+    [...topArticles, ...projectCandidates.map(candidate => candidate.article), ...researchCandidates.map(candidate => candidate.article), ...rejectedTopArticles]
   );
   await summarizeAdditionalArticles(supplementalCandidates);
   const finalSupplementalCandidates = supplementalCandidates.filter(hasUsableSummary);
@@ -3192,12 +3772,20 @@ async function main(): Promise<void> {
     };
   };
 
-  const finalArticles = topArticles.map(article => toScoredArticle(article, article.breakdown.projectMatches));
-  const projectIntelligenceArticles = projectCandidates.map(({ article, matches, cooldownProjectIds }) =>
+  const finalArticles = topArticles.map(article =>
+    toScoredArticle(article, qualifiedMatchesByArticle.get(article) || [])
+  );
+  const projectIntelligenceArticles = qualityApprovedProjectCandidates.map(({ article, matches, cooldownProjectIds }) =>
     toScoredArticle(article, matches, cooldownProjectIds)
   );
+  const researchIntelligenceArticles: ResearchIntelligenceArticle[] = qualityApprovedResearchCandidates.map(candidate => ({
+    ...toScoredArticle(candidate.article, qualifiedMatchesByArticle.get(candidate.article) || []),
+    researchAssessment: candidate.assessment,
+    attentionScore: candidate.attentionScore,
+    attentionSignals: candidate.attentionSignals,
+  }));
   const supplementalViewArticles = finalSupplementalCandidates.map(article =>
-    toScoredArticle(article, article.breakdown.projectMatches)
+    toScoredArticle(article, qualifiedMatchesByArticle.get(article) || [])
   );
   
   console.log(`[digest] Step 5/5: Generating today's highlights...`);
@@ -3232,7 +3820,9 @@ async function main(): Promise<void> {
     filteredArticles: recentArticles.length,
     hours,
     lang,
-  }, clawfeedContent, trendingRepos, designArticles, projects, projectIntelligenceArticles, supplementalViewArticles);
+  }, clawfeedContent, trendingRepos, designArticles, projects, projectIntelligenceArticles,
+  researchPolicy.mode === 'hybrid' || researchPolicy.mode === 'section' ? researchIntelligenceArticles : [],
+  supplementalViewArticles);
   
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, report);

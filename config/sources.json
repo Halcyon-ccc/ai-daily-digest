@@ -9,6 +9,62 @@
       "tags": ["multi-agent", "research"]
     },
     {
+      "name": "arXiv Artificial Intelligence",
+      "xmlUrl": "https://rss.arxiv.org/rss/cs.AI",
+      "htmlUrl": "https://arxiv.org/list/cs.AI/recent",
+      "tier": "research",
+      "maxTopItems": 3,
+      "tags": ["llm", "agent", "ai-research", "research"]
+    },
+    {
+      "name": "arXiv Computation and Language",
+      "xmlUrl": "https://rss.arxiv.org/rss/cs.CL",
+      "htmlUrl": "https://arxiv.org/list/cs.CL/recent",
+      "tier": "research",
+      "maxTopItems": 3,
+      "tags": ["llm", "language-model", "research"]
+    },
+    {
+      "name": "arXiv Machine Learning",
+      "xmlUrl": "https://rss.arxiv.org/rss/cs.LG",
+      "htmlUrl": "https://arxiv.org/list/cs.LG/recent",
+      "tier": "research",
+      "maxTopItems": 3,
+      "tags": ["machine-learning", "llm", "research"]
+    },
+    {
+      "name": "arXiv Cryptography and Security",
+      "xmlUrl": "https://rss.arxiv.org/rss/cs.CR",
+      "htmlUrl": "https://arxiv.org/list/cs.CR/recent",
+      "tier": "research",
+      "maxTopItems": 3,
+      "tags": ["security", "agent-security", "research"]
+    },
+    {
+      "name": "arXiv Computer Vision",
+      "xmlUrl": "https://rss.arxiv.org/rss/cs.CV",
+      "htmlUrl": "https://arxiv.org/list/cs.CV/recent",
+      "tier": "research",
+      "maxTopItems": 3,
+      "tags": ["multimodal", "ocr", "document-ai", "research"]
+    },
+    {
+      "name": "arXiv Sound",
+      "xmlUrl": "https://rss.arxiv.org/rss/cs.SD",
+      "htmlUrl": "https://arxiv.org/list/cs.SD/recent",
+      "tier": "research",
+      "maxTopItems": 3,
+      "tags": ["speech", "asr", "audio", "research"]
+    },
+    {
+      "name": "arXiv Audio and Speech Processing",
+      "xmlUrl": "https://rss.arxiv.org/rss/eess.AS",
+      "htmlUrl": "https://arxiv.org/list/eess.AS/recent",
+      "tier": "research",
+      "maxTopItems": 3,
+      "tags": ["speech", "asr", "audio", "research"]
+    },
+    {
       "name": "OpenAI News",
       "xmlUrl": "https://openai.com/news/rss.xml",
       "htmlUrl": "https://openai.com/news/",
