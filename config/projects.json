@@ -1,4 +1,18 @@
 {
+  "digestPolicy": {
+    "includeGeneric": true,
+    "genericMaxItems": 8
+  },
+  "researchPolicy": {
+    "enabled": true,
+    "mode": "hybrid",
+    "topics": ["llm", "agent"],
+    "maxItems": 3,
+    "candidateLimit": 20,
+    "minFrontierScore": 7,
+    "minEvidenceScore": 6,
+    "minAttentionScore": 4
+  },
   "projects": [
     {
       "id": "agent-security",
@@ -10,6 +24,8 @@
           "agentic system",
           "agentic systems",
           "autonomous agent",
+          "AI assistant",
+          "autonomous assistant",
           "multi-agent",
           "multi agent",
           "LLM agent",
@@ -26,8 +42,12 @@
         ],
         [
           "prompt injection",
+          "indirect prompt injection",
+          "hidden instruction",
+          "hidden instructions",
           "tool authorization",
           "authorization",
+          "authorization bypass",
           "access control",
           "permission controls",
           "human approval",
@@ -41,6 +61,8 @@
           "permission isolation",
           "privilege escalation",
           "data exfiltration",
+          "sensitive data leakage",
+          "sensitive data exfiltration",
           "AI safety",
           "safety test",
           "safety tests",
@@ -58,6 +80,8 @@
         "AI agent",
         "agentic system",
         "autonomous agent",
+        "AI assistant",
+        "autonomous assistant",
         "MCP",
         "Model Context Protocol",
         "tool calling",
@@ -70,7 +94,10 @@
       ],
       "supportingSignals": [
         "prompt injection",
+        "indirect prompt injection",
+        "hidden instructions",
         "tool authorization",
+        "authorization bypass",
         "access control",
         "permission controls",
         "human approval",
