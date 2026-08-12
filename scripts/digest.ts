@@ -37,7 +37,13 @@ const MIN_SUPPLEMENTAL_ADJUSTED_SCORE = 22;
 const MAX_SUMMARY_REPLACEMENT_CANDIDATES = 5;
 const DEFAULT_GENERIC_MAX_ITEMS = 50;
 const MAX_PROJECT_RESEARCH_CANDIDATES_PER_PROFILE = 4;
+const MAX_PROJECT_NON_RESEARCH_CANDIDATES_PER_PROFILE = 8;
 const MAX_TOTAL_PROJECT_RESEARCH_CANDIDATES = 8;
+const PROJECT_SOURCE_SOFT_LIMIT = 2;
+const RESEARCH_SOURCE_SOFT_LIMIT = 2;
+const SOURCE_HEALTH_WARNING_FAILURES = 3;
+const SOURCE_HEALTH_PAUSE_FAILURES = 7;
+const SOURCE_HEALTH_RETRY_INTERVAL_MS = 72 * 60 * 60 * 1000;
 const AGGREGATOR_HOSTS = new Set([
   'news.ycombinator.com',
   'reddit.com',
@@ -216,6 +222,7 @@ type SourceTier = 'first-party' | 'research' | 'secondary' | 'community' | 'aggr
 type VerificationStatus = 'first-party' | 'secondary' | 'traceable-secondary' | 'unverified';
 type ProjectSelectionPreset = 'strict' | 'balanced' | 'broad';
 type ResearchMode = 'disabled' | 'section' | 'replace-generic' | 'hybrid';
+type ProjectMatchType = 'direct' | 'transferable' | 'adjacent';
 
 interface FeedSource {
   name: string;
@@ -322,10 +329,24 @@ interface ProjectSourcePreferences {
 
 interface ProjectMatch {
   projectId: string;
+  matchType?: ProjectMatchType;
   projectRelevance: number;
   actionability: number;
   whyRelevant: string;
   recommendedAction: string;
+}
+
+interface SourceHealthRecord {
+  name: string;
+  consecutiveFailures: number;
+  lastAttempt: string;
+  lastSuccess?: string;
+  lastError?: string;
+}
+
+interface SourceHealthFile {
+  version: 1;
+  sources: Record<string, SourceHealthRecord>;
 }
 
 interface ArticleScore {
@@ -335,6 +356,10 @@ interface ArticleScore {
   category: CategoryId;
   keywords: string[];
   projectMatches: ProjectMatch[];
+}
+
+function getProjectMatchType(match: ProjectMatch): Exclude<ProjectMatchType, 'adjacent'> | 'adjacent' {
+  return match.matchType || (match.projectRelevance >= 9 ? 'direct' : 'transferable');
 }
 
 interface GeminiScoringResult {
@@ -735,7 +760,12 @@ function parseRSSItems(xml: string): Array<{ title: string; link: string; pubDat
 // Feed Fetching
 // ============================================================================
 
-async function fetchFeed(feed: FeedSource): Promise<Article[]> {
+interface FeedFetchResult {
+  articles: Article[];
+  error?: string;
+}
+
+async function fetchFeed(feed: FeedSource): Promise<FeedFetchResult> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FEED_FETCH_TIMEOUT_MS);
@@ -757,7 +787,7 @@ async function fetchFeed(feed: FeedSource): Promise<Article[]> {
     const xml = await response.text();
     const items = parseRSSItems(xml);
     
-    return items.map(item => ({
+    return { articles: items.map(item => ({
       title: item.title,
       link: item.link,
       pubDate: parseDate(item.pubDate) || new Date(0),
@@ -767,7 +797,7 @@ async function fetchFeed(feed: FeedSource): Promise<Article[]> {
       sourceTier: feed.tier,
       sourceTags: feed.tags,
       sourceMaxTopItems: feed.maxTopItems,
-    }));
+    })) };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     // Only log non-abort errors to reduce noise
@@ -776,33 +806,89 @@ async function fetchFeed(feed: FeedSource): Promise<Article[]> {
     } else {
       console.warn(`[digest] ✗ ${feed.name}: timeout`);
     }
-    return [];
+    return { articles: [], error: msg.includes('abort') ? 'timeout' : msg };
   }
 }
 
-async function fetchAllFeeds(feeds: FeedSource[]): Promise<Article[]> {
+async function loadSourceHealth(path: string): Promise<SourceHealthFile> {
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8')) as Partial<SourceHealthFile>;
+    return parsed.version === 1 && parsed.sources && typeof parsed.sources === 'object'
+      ? { version: 1, sources: parsed.sources }
+      : { version: 1, sources: {} };
+  } catch {
+    return { version: 1, sources: {} };
+  }
+}
+
+async function saveSourceHealth(path: string, health: SourceHealthFile): Promise<void> {
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, `${JSON.stringify(health, null, 2)}\n`);
+  } catch (error) {
+    console.warn(`[digest] Source health: could not save state (${error instanceof Error ? error.message : String(error)})`);
+  }
+}
+
+export function shouldPauseUnhealthySource(record: SourceHealthRecord | undefined, now: Date): boolean {
+  if (!record || record.consecutiveFailures < SOURCE_HEALTH_PAUSE_FAILURES) return false;
+  const lastAttempt = Date.parse(record.lastAttempt);
+  return Number.isFinite(lastAttempt) && now.getTime() - lastAttempt < SOURCE_HEALTH_RETRY_INTERVAL_MS;
+}
+
+async function fetchAllFeeds(feeds: FeedSource[], healthPath: string): Promise<Article[]> {
   const allArticles: Article[] = [];
   let successCount = 0;
   let failCount = 0;
+  let skippedCount = 0;
+  const now = new Date();
+  const health = await loadSourceHealth(healthPath);
+  const activeFeeds = feeds.filter(feed => {
+    if (!shouldPauseUnhealthySource(health.sources[feed.xmlUrl], now)) return true;
+    skippedCount++;
+    return false;
+  });
+  if (skippedCount > 0) {
+    console.warn(`[digest] Source health: temporarily skipped ${skippedCount} source(s) after ${SOURCE_HEALTH_PAUSE_FAILURES}+ consecutive failures; retry interval 72h`);
+  }
   
-  for (let i = 0; i < feeds.length; i += FEED_CONCURRENCY) {
-    const batch = feeds.slice(i, i + FEED_CONCURRENCY);
+  for (let i = 0; i < activeFeeds.length; i += FEED_CONCURRENCY) {
+    const batch = activeFeeds.slice(i, i + FEED_CONCURRENCY);
     const results = await Promise.allSettled(batch.map(fetchFeed));
     
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value.length > 0) {
-        allArticles.push(...result.value);
+    for (let offset = 0; offset < results.length; offset++) {
+      const result = results[offset]!;
+      const feed = batch[offset]!;
+      const previous = health.sources[feed.xmlUrl];
+      if (result.status === 'fulfilled' && result.value.articles.length > 0) {
+        allArticles.push(...result.value.articles);
         successCount++;
+        delete health.sources[feed.xmlUrl];
       } else {
         failCount++;
+        const error = result.status === 'rejected'
+          ? result.reason instanceof Error ? result.reason.message : String(result.reason)
+          : result.value.error || 'empty feed';
+        const consecutiveFailures = (previous?.consecutiveFailures || 0) + 1;
+        health.sources[feed.xmlUrl] = {
+          name: feed.name,
+          consecutiveFailures,
+          lastAttempt: now.toISOString(),
+          lastSuccess: previous?.lastSuccess,
+          lastError: error.slice(0, 200),
+        };
+        if (consecutiveFailures >= SOURCE_HEALTH_WARNING_FAILURES) {
+          console.warn(`[digest] Source health warning: ${feed.name} failed ${consecutiveFailures} consecutive run(s) (${error})`);
+        }
       }
     }
     
-    const progress = Math.min(i + FEED_CONCURRENCY, feeds.length);
-    console.log(`[digest] Progress: ${progress}/${feeds.length} feeds processed (${successCount} ok, ${failCount} failed)`);
+    const progress = Math.min(i + FEED_CONCURRENCY, activeFeeds.length);
+    console.log(`[digest] Progress: ${progress}/${activeFeeds.length} active feeds processed (${successCount} ok, ${failCount} failed, ${skippedCount} paused)`);
   }
   
-  console.log(`[digest] Fetched ${allArticles.length} articles from ${successCount} feeds (${failCount} failed)`);
+  await saveSourceHealth(healthPath, health);
+  console.log(`[digest] Fetched ${allArticles.length} articles from ${successCount} feeds (${failCount} failed, ${skippedCount} paused)`);
   return allArticles;
 }
 
@@ -1489,9 +1575,15 @@ function validateProjectMatches(
 
     const projectRelevance = clampScore(record.projectRelevance);
     if (projectRelevance < project.selection.minMatchRelevance) continue;
+    const matchType: ProjectMatchType = record.matchType === 'direct'
+      || record.matchType === 'transferable'
+      || record.matchType === 'adjacent'
+      ? record.matchType
+      : projectRelevance >= 9 ? 'direct' : 'transferable';
 
     matches.push({
       projectId,
+      matchType,
       projectRelevance,
       actionability: clampScore(record.actionability),
       whyRelevant: truncateText(record.whyRelevant),
@@ -1556,62 +1648,11 @@ function validateArticleScore(
 // ============================================================================
 
 function buildScoringPrompt(
-  articles: Array<{ index: number; title: string; description: string; sourceName: string }>,
-  projects: ProjectConfig[]
+  articles: Array<{ index: number; title: string; description: string; sourceName: string }>
 ): string {
   const articlesList = articles.map(a =>
     `Index ${a.index}: [${a.sourceName}] ${a.title}\n${a.description.slice(0, 300)}`
   ).join('\n\n---\n\n');
-
-  const projectContext = projects.length === 0
-    ? ''
-    : `
-## 项目方向匹配
-
-请在保留通用评分字段的同时，判断文章是否与以下已配置项目方向相关。
-这些项目资料是用户明确批准用于本次评分的非敏感项目画像。不要推断或补充未在文章标题/描述中出现的信息。
-
-${projects.map(project => `### ${project.id}: ${project.name}
-- 目标: ${project.goal}
-- 必须同时满足的信号组: ${project.requiredSignalGroups.length > 0 ? project.requiredSignalGroups.map((group, index) => `组${index + 1}(${group.join(', ')})`).join('；') : '无'}
-- 单组核心必要信号: ${project.requiredSignalGroups.length === 0 && project.requiredSignals.length > 0 ? project.requiredSignals.join(', ') : '无额外限制'}
-- 辅助信号: ${project.supportingSignals.length > 0 ? project.supportingSignals.join(', ') : '无'}
-- 负面信号: ${project.negativeSignals.length > 0 ? project.negativeSignals.join(', ') : '无'}
-- 关键词: ${project.keywords.join(', ')}
-- 相关实体: ${project.entities.length > 0 ? project.entities.join(', ') : '无'}
-- 排除主题: ${project.exclude.length > 0 ? project.exclude.join(', ') : '无'}
-- 匹配最低分: ${project.selection.minMatchRelevance}/10
-- 筛选严格度: ${project.selection.preset}`).join('\n\n')}
-
-项目匹配规则：
-1. 一篇文章可以匹配 0 个、1 个或多个项目。
-2. 必须逐个、独立评估每个项目，并返回所有达到对应项目“匹配最低分”的匹配；不能只返回最相关的一个项目。
-3. projectId 必须来自上方项目 ID，不能编造。
-4. 关键词重合本身不足以给高分，必须结合文章主题判断。
-5. 配置了“必须同时满足的信号组”时，文章标题或描述必须对每一组都明确命中至少一个信号；辅助信号、关键词或实体不能代替任何缺失的组。
-6. 未配置分组但配置了单组核心必要信号时，文章标题或描述必须明确支持至少一个核心必要信号。
-7. 仅讨论 Agent 架构、能力或性能，却没有明确安全、隐私、授权、隔离或合规证据的文章，不得匹配 Agent 安全项目。
-8. 出现负面信号或排除主题，且没有满足必要信号要求时，不得返回项目匹配。
-9. 纯营销、融资或空泛观点内容不应获得高项目分。
-10. 不要编造标题或描述没有支持的信息。
-11. whyRelevant 必须用中文指出满足各必要信号组的具体证据，并说明它为何与项目相关。
-12. recommendedAction 必须用中文给出具体下一步动作。
-13. 具体动作可以包括：加入评测候选池、与当前架构对比、阅读技术文档、复现实验、增加安全检查、跟踪上游项目等。
-14. 明确描述 multi-agent 系统的架构、构建、实现、编排、协作或生产部署时，应独立评估多 Agent 架构项目，即使同一文章也涉及安全或合规。
-`;
-
-  const projectJsonExample = projects.length === 0
-    ? ''
-    : `,
-      "projectMatches": [
-        {
-          "projectId": "${projects[0]?.id || 'project-id'}",
-          "projectRelevance": 8,
-          "actionability": 7,
-          "whyRelevant": "文章主题与该项目目标直接相关。",
-          "recommendedAction": "加入后续技术评估清单，并对照当前方案检查可落地点。"
-        }
-      ]`;
 
   return `你是一个技术内容策展人，正在为一份面向技术爱好者的每日精选摘要筛选文章。
 
@@ -1649,13 +1690,11 @@ ${projects.map(project => `### ${project.id}: ${project.name}
 ## 关键词提取
 提取 2-4 个最能代表文章主题的关键词（用英文，简短，如 "Rust", "LLM", "database", "performance"）
 
-${projectContext}
-
 ## 待评分文章
 
 ${articlesList}
 
-请严格按 JSON 格式返回，不要包含 markdown 代码块或其他文字。每个结果的 index 必须原样使用待评分文章中 Index 后的数字，不要按批次重新编号。${projects.length > 0 ? '如果文章没有匹配项目，请返回空数组 "projectMatches": []。' : ''}
+请严格按 JSON 格式返回，不要包含 markdown 代码块或其他文字。每个结果的 index 必须原样使用待评分文章中 Index 后的数字，不要按批次重新编号。
 {
   "results": [
     {
@@ -1664,10 +1703,53 @@ ${articlesList}
       "quality": 7,
       "timeliness": 9,
       "category": "engineering",
-      "keywords": ["Rust", "compiler", "performance"]${projectJsonExample}
+      "keywords": ["Rust", "compiler", "performance"]
     }
   ]
 }`;
+}
+
+function buildProjectScoringPrompt(
+  articles: Array<{ index: number; title: string; description: string; sourceName: string; possibleProjectIds?: string[] }>,
+  projects: ProjectConfig[]
+): string {
+  const projectById = new Map(projects.map(project => [project.id, project]));
+  const articlesList = articles.map(article => {
+    const candidateProjects = (article.possibleProjectIds || [])
+      .map(id => projectById.get(id))
+      .filter((project): project is ProjectConfig => Boolean(project));
+    return `Index ${article.index}: [${article.sourceName}] ${article.title}\n${stripHtml(article.description).slice(0, 220)}\n候选项目: ${candidateProjects.map(project => project.id).join(', ')}`;
+  }).join('\n\n---\n\n');
+  const projectContext = projects.map(project => `### ${project.id}: ${project.name}
+- 目标: ${project.goal}
+- 必须信号组: ${project.requiredSignalGroups.length > 0 ? project.requiredSignalGroups.map(group => `(${group.join(', ')})`).join(' + ') : project.requiredSignals.join(', ') || '无'}
+- 辅助信号: ${project.supportingSignals.slice(0, 12).join(', ') || '无'}
+- 排除: ${[...project.negativeSignals, ...project.exclude].slice(0, 12).join(', ') || '无'}
+- 最低相关性: ${project.selection.minMatchRelevance}/10`).join('\n\n');
+
+  return `你是项目技术情报筛选器。只依据文章标题和摘要，对每篇文章列出的候选项目逐个判断，不做通用评分。
+
+${projectContext}
+
+匹配类型：
+- direct：文章直接研究、实现、评测或披露该项目要解决的问题。
+- transferable：对象不是该项目本身，但方法、模型、数据、评测或失败经验可明确迁移，whyRelevant 必须写清迁移点。
+- adjacent：只属于相邻领域或仅有宽泛关键词重合。adjacent 会被项目栏目排除。
+
+规则：
+1. 必须满足项目的每个必须信号组；辅助词不能替代缺失的必须组。
+2. 关键词重合、品牌背景、泛 Agent/AI 内容不能单独构成匹配。
+3. 直接相关优先；不要把可迁移参考夸大为直接相关。
+4. 返回所有达到最低相关性的候选项目；无匹配时返回空数组。
+5. whyRelevant 和 recommendedAction 使用中文，各不超过 120 字，不得补充原文没有的信息。
+6. index 和 projectId 必须原样返回。
+
+文章：
+
+${articlesList}
+
+严格返回 JSON，不要包含 markdown：
+{"results":[{"index":0,"projectMatches":[{"projectId":"project-id","matchType":"direct","projectRelevance":8,"actionability":7,"whyRelevant":"直接证据或明确迁移点。","recommendedAction":"具体下一步。"}]}]}`;
 }
 
 type IndexedScoringArticle = {
@@ -1703,7 +1785,9 @@ async function scoreArticlePass(
       const promptProjects = task === 'project-scoring'
         ? projects.filter(project => possibleProjectIds.has(project.id))
         : projects;
-      const prompt = buildScoringPrompt(batch, promptProjects);
+      const prompt = task === 'project-scoring'
+        ? buildProjectScoringPrompt(batch, promptProjects)
+        : buildScoringPrompt(batch);
       const batchIndices = batch.map(item => item.index);
       const allowedIndices = new Set(batchIndices);
       const projectsById = new Map(promptProjects.map(project => [project.id, project]));
@@ -1868,7 +1952,16 @@ export async function scoreArticlesWithAI(
   const possibleProjectsByIndex = new Map<number, Set<string>>();
   for (const project of projects) {
     const matching = indexed.filter(item => articleMightMatchProject(articles[item.index]!, project));
-    const nonResearch = matching.filter(item => articles[item.index]!.sourceTier !== 'research');
+    const nonResearch = matching
+      .filter(item => articles[item.index]!.sourceTier !== 'research')
+      .sort((a, b) => {
+        const articleA = articles[a.index]!;
+        const articleB = articles[b.index]!;
+        return getProjectSourcePreferenceScore(articleB, project) - getProjectSourcePreferenceScore(articleA, project)
+          || getGenericScore(genericScores.get(b.index)!) - getGenericScore(genericScores.get(a.index)!)
+          || articleB.pubDate.getTime() - articleA.pubDate.getTime();
+      })
+      .slice(0, MAX_PROJECT_NON_RESEARCH_CANDIDATES_PER_PROFILE);
     const research = matching
       .filter(item => articles[item.index]!.sourceTier === 'research')
       .sort((a, b) => getGenericScore(genericScores.get(b.index)!) - getGenericScore(genericScores.get(a.index)!))
@@ -1904,6 +1997,7 @@ export async function scoreArticlesWithAI(
   const referencedProjectIds = new Set(cappedProjectCandidates.flatMap(item => item.possibleProjectIds));
   console.log(
     `[digest] Project scoring candidates: ${cappedProjectCandidates.length}/${articles.length}; `
+    + `nonResearchCap=${MAX_PROJECT_NON_RESEARCH_CANDIDATES_PER_PROFILE}/profile; `
     + `research=${Math.min(researchProjectCandidates.length, prioritizedResearchIndices.size)}/${researchProjectCandidates.length}; `
     + `relevant profiles=${referencedProjectIds.size}/${projects.length}`
   );
@@ -2080,7 +2174,7 @@ interface ResearchCandidate<T> {
   attentionSignals: string[];
 }
 
-function getResearchAttention<T extends RankableArticle>(
+export function getResearchAttention<T extends RankableArticle>(
   article: T,
   allArticles: T[],
   trendingRepos: TrendingRepo[]
@@ -2088,12 +2182,19 @@ function getResearchAttention<T extends RankableArticle>(
   const sourceMentions = new Set(
     allArticles.filter(candidate => isSameDigestEvent(article, candidate)).map(getSourceChannelIdentity)
   ).size;
-  const titleTokens = tokenizeEventText(article.title);
+  const normalizeEntity = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const researchEntities = new Set(
+    (article.title.match(/\b(?=[A-Za-z0-9-]{4,}\b)(?=[A-Za-z0-9-]*(?:[A-Z]{2}|\d|-[A-Za-z0-9]))[A-Za-z][A-Za-z0-9-]*\b/g) || [])
+      .map(normalizeEntity)
+      .filter(entity => entity.length >= 4 && !EVENT_GENERIC_TOKENS.has(entity))
+  );
   const trendingMatch = trendingRepos.some(repo => {
-    const repoTokens = tokenizeEventText(`${repo.name} ${repo.description}`);
-    const shared = [...titleTokens].filter(token => repoTokens.has(token) && !EVENT_GENERIC_TOKENS.has(token));
-    return shared.length >= 2 && shared.some(token => token.length >= 5);
+    const repoName = repo.name.split('/').pop() || repo.name;
+    const repoEntity = normalizeEntity(repoName);
+    return repoEntity.length >= 4 && researchEntities.has(repoEntity);
   });
+  const codeAvailable = /\b(?:github\.com|code (?:is )?(?:available|released)|open[- ]source implementation|source code)\b|代码(?:已)?(?:开源|发布|可用)|开源实现/i
+    .test(`${article.title} ${article.description}`);
   let score = 1;
   const signals: string[] = ['研究论文源'];
   if (sourceMentions >= 2) {
@@ -2102,7 +2203,11 @@ function getResearchAttention<T extends RankableArticle>(
   }
   if (trendingMatch) {
     score += 3;
-    signals.push('关联 GitHub Trending');
+    signals.push('论文实体关联 GitHub Trending');
+  }
+  if (codeAvailable) {
+    score += 1;
+    signals.push('摘要明确提供代码线索');
   }
   if (article.genericScore >= 24) {
     score += 2;
@@ -2150,11 +2255,14 @@ export async function selectResearchIntelligenceCandidates<T extends RankableArt
     && candidate.assessment.evidenceScore >= policy.minEvidenceScore
   );
   const fresh = qualified.filter(candidate => !appearedInRecentDigest(candidate.article, recentHistory));
-  const selected = fresh.sort((a, b) =>
+  const ordered = fresh.sort((a, b) =>
     b.assessment.frontierScore * 2 + b.assessment.evidenceScore + b.assessment.impactScore + b.assessment.reproducibilityScore + b.attentionScore
     - (a.assessment.frontierScore * 2 + a.assessment.evidenceScore + a.assessment.impactScore + a.assessment.reproducibilityScore + a.attentionScore)
     || b.article.pubDate.getTime() - a.article.pubDate.getTime()
-  ).slice(0, policy.maxItems);
+  );
+  const selectedArticles = applySoftSourceDiversity(ordered.map(candidate => candidate.article), policy.maxItems, RESEARCH_SOURCE_SOFT_LIMIT);
+  const selectedSet = new Set(selectedArticles);
+  const selected = ordered.filter(candidate => selectedSet.has(candidate.article));
   console.log(
     `[digest] Research intelligence: evaluated=${evaluated.length}, qualified=${qualified.length}, `
     + `cooldown=${qualified.length - fresh.length}, selected=${selected.length}`
@@ -2750,6 +2858,25 @@ function applySourceTopLimits<T extends RankableArticle>(articles: T[], topN: nu
   return selected.length > 0 ? selected : articles.slice(0, Math.min(1, topN));
 }
 
+function applySoftSourceDiversity<T extends RankableArticle>(articles: T[], limit: number, softLimit: number): T[] {
+  if (limit <= 0) return [];
+  const selected: T[] = [];
+  const deferred: T[] = [];
+  const sourceCounts = new Map<string, number>();
+  for (const article of articles) {
+    const identity = getSourceChannelIdentity(article);
+    const count = sourceCounts.get(identity) || 0;
+    if (count >= softLimit) {
+      deferred.push(article);
+      continue;
+    }
+    selected.push(article);
+    sourceCounts.set(identity, count + 1);
+    if (selected.length >= limit) return selected;
+  }
+  return [...selected, ...deferred].slice(0, limit);
+}
+
 interface RankArticlesOptions<T extends RankableArticle> {
   prioritizedProjectArticles?: T[];
   prioritizedResearchArticles?: T[];
@@ -2766,7 +2893,7 @@ export function rankArticles<T extends RankableArticle>(
 ): T[] {
   if (topN <= 0) return [];
 
-  const prioritizedProjectArticles = deduplicateRankedEvents(options.prioritizedProjectArticles || [])
+  const orderedProjectArticles = deduplicateRankedEvents(options.prioritizedProjectArticles || [])
     .sort((a, b) => {
       const matchesA = options.qualifiedProjectMatches?.get(a) || [];
       const matchesB = options.qualifiedProjectMatches?.get(b) || [];
@@ -2776,16 +2903,22 @@ export function rankArticles<T extends RankableArticle>(
       const bestB = [...matchesB].sort((x, y) =>
         y.projectRelevance - x.projectRelevance || y.actionability - x.actionability
       )[0];
-      return (bestB?.projectRelevance || 0) - (bestA?.projectRelevance || 0)
+      const typeRank = (match?: ProjectMatch): number => !match ? 0 : getProjectMatchType(match) === 'direct' ? 2 : getProjectMatchType(match) === 'transferable' ? 1 : 0;
+      return typeRank(bestB) - typeRank(bestA)
+        || (bestB?.projectRelevance || 0) - (bestA?.projectRelevance || 0)
         || (bestB?.actionability || 0) - (bestA?.actionability || 0)
         || getAdjustedGenericScore(b) - getAdjustedGenericScore(a)
         || b.genericScore - a.genericScore
         || b.pubDate.getTime() - a.pubDate.getTime();
-    })
-    .slice(0, topN);
-  const prioritizedResearchArticles = deduplicateRankedEvents(options.prioritizedResearchArticles || [])
+    });
+  const prioritizedProjectArticles = applySoftSourceDiversity(orderedProjectArticles, topN, PROJECT_SOURCE_SOFT_LIMIT);
+  const prioritizedResearchArticles = applySoftSourceDiversity(
+    deduplicateRankedEvents(options.prioritizedResearchArticles || [])
     .filter(article => !prioritizedProjectArticles.some(priority => isSameDigestEvent(article, priority)))
-    .slice(0, Math.max(0, topN - prioritizedProjectArticles.length));
+    .sort(compareGenericRank),
+    Math.max(0, topN - prioritizedProjectArticles.length),
+    RESEARCH_SOURCE_SOFT_LIMIT
+  );
   const genericQuota = Math.max(0, (options.genericMaxItems ?? topN) - prioritizedResearchArticles.length);
   const genericLimit = options.includeGeneric === false
     ? 0
@@ -3058,7 +3191,9 @@ function getProjectSourcePreferenceScore(
 function compareProjectEventCandidates<
   T extends { title: string; description: string; link: string; sourceUrl: string; sourceTier?: SourceTier; sourceTags?: string[]; breakdown: ArticleScore; genericScore: number; projectAwareScore: number; pubDate: Date }
 >(a: ProjectEventCandidate<T>, b: ProjectEventCandidate<T>, project: ProjectConfig, eventContext = ''): number {
-  return getProjectSourcePreferenceScore(b.article, project) - getProjectSourcePreferenceScore(a.article, project)
+  const matchTypeRank = (match: ProjectMatch): number => getProjectMatchType(match) === 'direct' ? 2 : getProjectMatchType(match) === 'transferable' ? 1 : 0;
+  return matchTypeRank(b.match) - matchTypeRank(a.match)
+    || getProjectSourcePreferenceScore(b.article, project) - getProjectSourcePreferenceScore(a.article, project)
     || getSourceAuthorityScore(b.article, eventContext) - getSourceAuthorityScore(a.article, eventContext)
     || b.article.breakdown.quality - a.article.breakdown.quality
     || b.match.projectRelevance - a.match.projectRelevance
@@ -3082,7 +3217,8 @@ export function selectProjectIntelligenceCandidates<
       match.projectRelevance >= project.selection.minSectionRelevance
     );
     const eligible = relevanceQualified.filter(({ article, match }) =>
-      article.breakdown.quality >= project.selection.minArticleQuality
+      getProjectMatchType(match) !== 'adjacent'
+      && article.breakdown.quality >= project.selection.minArticleQuality
       && match.actionability >= project.selection.minActionability
     );
     const eventClusters: Array<Array<ProjectEventCandidate<T>>> = [];
@@ -3100,24 +3236,34 @@ export function selectProjectIntelligenceCandidates<
           .join(' ');
         return [...cluster].sort((a, b) => compareProjectEventCandidates(a, b, project, eventContext))[0]!;
       })
-      .sort((a, b) =>
-        b.match.projectRelevance - a.match.projectRelevance
+      .sort((a, b) => {
+        const typeRank = (match: ProjectMatch): number => getProjectMatchType(match) === 'direct' ? 2 : getProjectMatchType(match) === 'transferable' ? 1 : 0;
+        return typeRank(b.match) - typeRank(a.match)
+        || b.match.projectRelevance - a.match.projectRelevance
         || b.match.actionability - a.match.actionability
         || getProjectSourcePreferenceScore(b.article, project) - getProjectSourcePreferenceScore(a.article, project)
         || b.article.projectAwareScore - a.article.projectAwareScore
         || getSourceAuthorityScore(b.article) - getSourceAuthorityScore(a.article)
         || b.article.genericScore - a.article.genericScore
-        || b.article.pubDate.getTime() - a.article.pubDate.getTime()
-      );
-    const fresh = eventRepresentatives.filter(({ article }) => !appearedInRecentDigest(article, recentHistory));
-    const coolingDown = eventRepresentatives.filter(({ article }) => appearedInRecentDigest(article, recentHistory));
+        || b.article.pubDate.getTime() - a.article.pubDate.getTime();
+      });
+    const direct = eventRepresentatives.filter(({ match }) => getProjectMatchType(match) === 'direct');
+    const transferable = eventRepresentatives.filter(({ match }) => getProjectMatchType(match) === 'transferable');
+    const fresh = [
+      ...direct.filter(({ article }) => !appearedInRecentDigest(article, recentHistory)),
+      ...transferable.filter(({ article }) => !appearedInRecentDigest(article, recentHistory)),
+    ];
+    const coolingDown = [
+      ...direct.filter(({ article }) => appearedInRecentDigest(article, recentHistory)),
+      ...transferable.filter(({ article }) => appearedInRecentDigest(article, recentHistory)),
+    ];
     const selectedFresh = fresh.slice(0, project.selection.maxItems);
     const backfilled = coolingDown.slice(0, project.selection.maxItems - selectedFresh.length);
     const selected = [...selectedFresh, ...backfilled];
     const backfilledArticles = new Set(backfilled.map(({ article }) => article));
 
     console.log(
-      `[digest] Project ${project.id} (${project.selection.preset}): matched=${modelMatches.length}, relevance>=${project.selection.minSectionRelevance}=${relevanceQualified.length}, quality>=${project.selection.minArticleQuality} and actionability>=${project.selection.minActionability}=${eligible.length}, uniqueEvents=${eventClusters.length}, duplicates=${eligible.length - eventClusters.length}, cooldownCandidates=${coolingDown.length}, backfilled=${backfilled.length}, selected=${selected.length}`
+      `[digest] Project ${project.id} (${project.selection.preset}): matched=${modelMatches.length}, relevance>=${project.selection.minSectionRelevance}=${relevanceQualified.length}, quality>=${project.selection.minArticleQuality} and actionability>=${project.selection.minActionability}=${eligible.length}, direct=${direct.length}, transferable=${transferable.length}, adjacentExcluded=${relevanceQualified.filter(({ match }) => getProjectMatchType(match) === 'adjacent').length}, uniqueEvents=${eventClusters.length}, duplicates=${eligible.length - eventClusters.length}, cooldownCandidates=${coolingDown.length}, backfilled=${backfilled.length}, selected=${selected.length}`
     );
 
     for (const { article, match } of selected) {
@@ -3158,7 +3304,8 @@ export function renderProjectIntelligenceSection(articles: ScoredArticle[], proj
     }
 
     items.sort((a, b) =>
-      b.match.projectRelevance - a.match.projectRelevance
+      (getProjectMatchType(b.match) === 'direct' ? 2 : 1) - (getProjectMatchType(a.match) === 'direct' ? 2 : 1)
+      || b.match.projectRelevance - a.match.projectRelevance
       || b.match.actionability - a.match.actionability
       || b.article.score - a.article.score
     );
@@ -3175,11 +3322,13 @@ export function renderProjectIntelligenceSection(articles: ScoredArticle[], proj
       section += `#### [${article.titleZh || article.title}](${article.link})\n\n`;
       if (statusLabels.length > 0) section += `> **状态**：${statusLabels.join(' · ')}\n\n`;
       if (!includedInTop) section += `${article.summary}\n\n`;
+      section += `- **匹配类型**：${getProjectMatchType(match) === 'direct' ? '直接相关' : '可迁移参考'}\n`;
       section += `- **项目相关性**：${match.projectRelevance}/10\n`;
       section += `- **可落地性**：${match.actionability}/10\n`;
       section += `- **为什么相关**：${match.whyRelevant || '模型未提供具体说明。'}\n`;
       section += `- **建议动作**：${match.recommendedAction || '加入后续人工评估清单。'}\n`;
       section += `- **来源**：${article.sourceName}${verificationLabel ? ` · ${verificationLabel}` : ''}\n\n`;
+      if (verificationLabel === '待核实') section += `> **核实提示**：当前摘要未提供可追溯的一手来源，请核实后再采取行动。\n\n`;
     }
   }
 
@@ -3209,7 +3358,9 @@ export function renderResearchIntelligenceSection(
     section += `- **关注动量**：${article.attentionScore}/10 · ${article.attentionSignals.join(' · ')}\n`;
     section += `- **研究价值**：${assessment.whyImportant}\n`;
     section += `- **证据限制**：${assessment.limitations}\n`;
-    section += `- **来源**：${article.sourceName}\n\n`;
+    const verificationLabel = getVerificationLabel(article);
+    section += `- **来源**：${article.sourceName}${verificationLabel ? ` · ${verificationLabel}` : ''}\n\n`;
+    if (verificationLabel === '待核实') section += `> **核实提示**：当前摘要未提供可追溯的一手来源。\n\n`;
   }
   section += `---\n\n`;
   return section;
@@ -3423,6 +3574,7 @@ Environment:
   X_ACCOUNTS       Comma-separated X/Twitter accounts to follow (e.g. karpathy,sama,ylecun)
   PROJECTS_CONFIG_PATH Optional project profile JSON path (default: config/projects.json)
   SOURCES_CONFIG_PATH Optional additional RSS/Atom source JSON path (default: config/sources.json)
+  SOURCE_HEALTH_PATH Optional persistent feed health JSON path (default: source-health.json beside output)
 
 Examples:
   bun scripts/digest.ts --hours 24 --top-n 10 --lang zh
@@ -3522,13 +3674,14 @@ async function main(): Promise<void> {
 
   const xFeeds = buildXFeeds();
   const allFeeds = mergeFeedSources(RSS_FEEDS, configuredSources, xFeeds);
+  const sourceHealthPath = process.env.SOURCE_HEALTH_PATH?.trim() || `${dirname(outputPath)}/source-health.json`;
   if (xFeeds.length > 0) {
     console.log(`[digest] X/Twitter accounts: ${xFeeds.map(f => f.name).join(', ')} (via ${RSSHUB_BASE_URL})`);
   }
 
   console.log(`[digest] Step 1/5: Fetching ${allFeeds.length} feeds + ClawFeed + GitHub Trending (parallel)...`);
   const [allArticles, clawfeedContent, trendingRepos] = await Promise.all([
-    fetchAllFeeds(allFeeds),
+    fetchAllFeeds(allFeeds, sourceHealthPath),
     fetchClawFeedDigest(),
     fetchGitHubTrending(),
   ]);
@@ -3823,6 +3976,13 @@ async function main(): Promise<void> {
   }, clawfeedContent, trendingRepos, designArticles, projects, projectIntelligenceArticles,
   researchPolicy.mode === 'hybrid' || researchPolicy.mode === 'section' ? researchIntelligenceArticles : [],
   supplementalViewArticles);
+
+  console.log(
+    `[digest] Selection funnel: recent=${recentArticles.length} -> AI-scored=${scoredArticles.length} `
+    + `-> model-project-matched=${projectMatchedCount} -> project-selected=${projectIntelligenceArticles.length} `
+    + `-> research-selected=${researchIntelligenceArticles.length} -> Top=${finalArticles.length} `
+    + `-> supplemental=${supplementalViewArticles.length}`
+  );
   
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, report);

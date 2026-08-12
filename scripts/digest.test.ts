@@ -9,10 +9,12 @@ import {
   scoreArticlesWithAI,
   selectProjectIntelligenceCandidates,
   selectSupplementalViewCandidates,
+  shouldPauseUnhealthySource,
   extractProjectDigestHistory,
   loadConfiguredSources,
   extractTopDigestHistory,
   getGenericRankingAdjustment,
+  getResearchAttention,
   isLowInformationGeneratedSummary,
   isSameDigestEvent,
   loadRecentDigestHistory,
@@ -322,6 +324,23 @@ describe('global digest ranking', () => {
     expect(ranked).toHaveLength(8);
   });
 
+  test('soft-diversifies project-priority sources without dropping qualified items', () => {
+    const sameSource = [30, 29, 28].map((score, index) => ({
+      ...makeArticle(`Project intelligence ${index}`, `https://publisher.example/${index}`, 'Publisher', score),
+      sourceUrl: 'https://publisher.example',
+    }));
+    const alternate = {
+      ...makeArticle('Independent project intelligence', 'https://independent.example/article', 'Independent', 27),
+      sourceUrl: 'https://independent.example',
+    };
+    const ranked = rankArticles([...sameSource, alternate], 4, [], {
+      prioritizedProjectArticles: [...sameSource, alternate],
+      includeGeneric: false,
+    });
+
+    expect(ranked.map(article => article.sourceName)).toEqual(['Publisher', 'Publisher', 'Independent', 'Publisher']);
+  });
+
   test('selects up to three qualified supplemental views from sources absent from Top N', () => {
     const top = makeArticle('Top source article', 'https://top.example/article', 'Top', 30);
     const sameTopSource = makeArticle('Another strong article', 'https://top.example/another', 'Top', 29);
@@ -330,7 +349,10 @@ describe('global digest ranking', () => {
     const sourceC = makeArticle('Database reliability study', 'https://c.example/study', 'Source C', 26);
     const cooled = makeArticle('Compiler performance release', 'https://d.example/release', 'Source D', 25);
     const projectOnly = makeArticle('Agent security implementation', 'https://e.example/security', 'Source E', 24);
-    const sourceF = makeArticle('Browser standards update', 'https://f.example/standards', 'Source F', 23);
+    const sourceF = {
+      ...makeArticle('Browser standards update', 'https://f.example/standards', 'Source F', 23),
+      description: 'Detailed browser standards update with implementation notes and compatibility guidance.',
+    };
     const lowQuality = {
       ...makeArticle('Thin vendor claim', 'https://g.example/claim', 'Source G', 24),
       breakdown: {
@@ -588,6 +610,39 @@ describe('AI scoring batches', () => {
     expect(projectPrompts[0]).toContain('### multi-agent-architecture:');
     expect(projectPrompts[0]).not.toContain('### asr-voice:');
     expect(projectPrompts[0]).not.toContain('### ocr-product:');
+    expect(projectPrompts[0]).toContain('"matchType":"direct"');
+    expect(projectPrompts[0]).not.toContain('### 1. 相关性');
+  });
+});
+
+describe('research attention signals', () => {
+  test('requires an explicit paper entity for GitHub Trending attention', () => {
+    const article = {
+      title: 'CMU-Drive and V2V-VLA: Collaborative Multi-Agent Driving',
+      description: 'We present a benchmark for multi-agent systems with code available at github.com/example/v2v-vla.',
+      link: 'https://arxiv.org/abs/2608.00001',
+      pubDate: new Date(),
+      sourceName: 'arXiv',
+      sourceUrl: 'https://arxiv.org',
+      sourceTier: 'research' as const,
+      genericScore: 24,
+      projectAwareScore: 24,
+      breakdown: { relevance: 8, quality: 8, timeliness: 8, category: 'ai-ml' as const, keywords: [], projectMatches: [] },
+    };
+    const genericRepo = { name: 'agent-framework', url: '', description: 'Multi-agent model tools', stars: 0, todayStars: 0, language: '', forks: 0 };
+    const exactRepo = { ...genericRepo, name: 'example/V2V-VLA' };
+
+    expect(getResearchAttention(article, [article], [genericRepo]).signals).not.toContain('论文实体关联 GitHub Trending');
+    expect(getResearchAttention(article, [article], [exactRepo]).signals).toContain('论文实体关联 GitHub Trending');
+    expect(getResearchAttention(article, [article], [exactRepo]).signals).toContain('摘要明确提供代码线索');
+  });
+});
+
+describe('source health policy', () => {
+  test('pauses repeatedly failing sources and retries them after 72 hours', () => {
+    const now = new Date('2026-08-12T00:00:00Z');
+    expect(shouldPauseUnhealthySource({ name: 'Broken feed', consecutiveFailures: 7, lastAttempt: '2026-08-11T00:00:00Z' }, now)).toBe(true);
+    expect(shouldPauseUnhealthySource({ name: 'Broken feed', consecutiveFailures: 7, lastAttempt: '2026-08-08T00:00:00Z' }, now)).toBe(false);
   });
 });
 
@@ -684,6 +739,45 @@ describe('AI summary batches', () => {
 });
 
 describe('per-project selection', () => {
+  test('prioritizes direct matches, backfills transferable matches, and excludes adjacent matches', () => {
+    const [project] = validateProjectsConfig({ projects: [{
+      id: 'ocr', name: 'OCR', goal: 'Packaging OCR', keywords: ['OCR'], selection: { preset: 'broad', maxItems: 2 },
+    }] });
+    const makeMatchArticle = (name: string, matchType: 'direct' | 'transferable' | 'adjacent', relevance: number) => ({
+      title: matchType === 'direct'
+        ? 'Packaging label OCR structured extraction benchmark'
+        : matchType === 'transferable'
+          ? 'Historical document layout recognition dataset'
+          : 'General multimodal image generation release',
+      description: `${name} provides detailed OCR extraction benchmark results and implementation evidence.`,
+      link: `https://${name}.example/article`,
+      pubDate: new Date(),
+      sourceName: name,
+      sourceUrl: `https://${name}.example`,
+      sourceTier: 'research' as const,
+      genericScore: 24,
+      projectAwareScore: 40,
+      breakdown: {
+        relevance: 8,
+        quality: 8,
+        timeliness: 8,
+        category: 'ai-ml' as const,
+        keywords: ['OCR'],
+        projectMatches: [{
+          projectId: 'ocr', matchType, projectRelevance: relevance, actionability: 8,
+          whyRelevant: name, recommendedAction: 'Evaluate',
+        }],
+      },
+    });
+    const selected = selectProjectIntelligenceCandidates([
+      makeMatchArticle('transferable', 'transferable', 10),
+      makeMatchArticle('adjacent', 'adjacent', 10),
+      makeMatchArticle('direct', 'direct', 8),
+    ], [project!]);
+
+    expect(selected.map(item => item.matches[0]?.matchType)).toEqual(['direct', 'transferable']);
+  });
+
   test('applies strict quality and actionability thresholds', () => {
     const [strictProject] = validateProjectsConfig({
       projects: [{

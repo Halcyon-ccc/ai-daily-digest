@@ -98,7 +98,7 @@ jobs:
             exit 0
           fi
 
-          # Keep the existing generic excerpt, then append a compact project status.
+          # Keep the existing generic excerpt, then append compact project and research status.
           TITLE="📰 AI 每日精选 $(TZ=Asia/Shanghai date +%Y-%m-%d)"
           DESP=$(awk '
             /^## 📝 今日看点/{found=1; next}
@@ -121,6 +121,21 @@ jobs:
           ## 🎯 项目相关情报
 
           ${PROJECT_SUMMARY}"
+          fi
+
+          RESEARCH_SUMMARY=$(awk '
+            /^## 📚 前沿论文与研究/{research=1; next}
+            research && /^---$/{exit}
+            research && /^### /{count++; if (count <= 2) {sub(/^### /, "- "); print}; next}
+            research && count <= 2 && /^- \*\*研究价值\*\*/{print; next}
+          ' "$DIGEST_FILE")
+
+          if [ -n "$RESEARCH_SUMMARY" ]; then
+            DESP="${DESP}
+
+          ## 📚 前沿论文与研究
+
+          ${RESEARCH_SUMMARY}"
           fi
 
           DESP="${DESP}
@@ -172,6 +187,21 @@ jobs:
           ## 🎯 项目相关情报
 
           ${PROJECT_SUMMARY}"
+          fi
+
+          RESEARCH_SUMMARY=$(awk '
+            /^## 📚 前沿论文与研究/{research=1; next}
+            research && /^---$/{exit}
+            research && /^### /{count++; if (count <= 2) {sub(/^### /, "- "); print}; next}
+            research && count <= 2 && /^- \*\*研究价值\*\*/{print; next}
+          ' "$DIGEST_FILE")
+
+          if [ -n "$RESEARCH_SUMMARY" ]; then
+            SUMMARY="${SUMMARY}
+
+          ## 📚 前沿论文与研究
+
+          ${RESEARCH_SUMMARY}"
           fi
 
           DIGEST_URL="https://github.com/${{ github.repository }}/blob/main/${DIGEST_FILE}"
