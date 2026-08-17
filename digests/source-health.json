@@ -3,320 +3,338 @@
   "sources": {
     "https://lcamtuf.substack.com/feed": {
       "name": "lcamtuf.substack.com",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 403"
     },
     "https://utcc.utoronto.ca/~cks/space/blog/?atom": {
       "name": "utcc.utoronto.ca/~cks",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 403"
     },
     "https://garymarcus.substack.com/feed": {
       "name": "garymarcus.substack.com",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 403"
     },
     "https://rachelbythebay.com/w/atom.xml": {
       "name": "rachelbythebay.com",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "timeout"
     },
     "https://joanwestenberg.com/rss": {
       "name": "joanwestenberg.com",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 404"
     },
     "https://gwern.substack.com/feed": {
       "name": "gwern.net",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 403"
     },
     "https://worksonmymachine.substack.com/feed": {
       "name": "worksonmymachine.substack.com",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 403"
     },
     "https://www.tedunangst.com/flak/rss": {
       "name": "tedunangst.com",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "Unable to connect. Is the computer able to access the url?"
     },
     "https://stability.ai/blog/feed": {
       "name": "Stability AI Blog",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 404"
     },
     "https://research.runwayml.com/feed.xml": {
       "name": "Runway Research",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 404"
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
-      "lastError": "HTTP 429"
-    },
-    "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
-      "name": "r/midjourney",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
       "name": "r/comfyui",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/singularity/top/.rss?t=day": {
       "name": "r/singularity",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 429"
     },
     "http://localhost:1200/twitter/user/grok": {
       "name": "𝕏 @grok",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/xingpt": {
       "name": "𝕏 @xingpt",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/FinanceYF5": {
       "name": "𝕏 @FinanceYF5",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/sodawhite_dev": {
       "name": "𝕏 @sodawhite_dev",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/yetone": {
       "name": "𝕏 @yetone",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/runes_leo": {
       "name": "𝕏 @runes_leo",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/abskoop": {
       "name": "𝕏 @abskoop",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/egeberkina": {
       "name": "𝕏 @egeberkina",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/vasuman": {
       "name": "𝕏 @vasuman",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/eptwts": {
       "name": "𝕏 @eptwts",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/EXM7777": {
       "name": "𝕏 @EXM7777",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/steipete": {
       "name": "𝕏 @steipete",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/rileybrown": {
       "name": "𝕏 @rileybrown",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/yangyi": {
       "name": "𝕏 @yangyi",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/manateelazycat": {
       "name": "𝕏 @manateelazycat",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/lifesinger": {
       "name": "𝕏 @lifesinger",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/yuxiyou": {
       "name": "𝕏 @yuxiyou",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/gregisenberg": {
       "name": "𝕏 @gregisenberg",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/oran_ge": {
       "name": "𝕏 @oran_ge",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/LangChain": {
       "name": "𝕏 @LangChain",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/OpenAI": {
       "name": "𝕏 @OpenAI",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/AnthropicAI": {
       "name": "𝕏 @AnthropicAI",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/Khazix0918": {
       "name": "𝕏 @Khazix0918",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/dotey": {
       "name": "𝕏 @dotey",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/deepseek_ai": {
       "name": "𝕏 @deepseek_ai",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/_akhaliq": {
       "name": "𝕏 @_akhaliq",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/DrJimFan": {
       "name": "𝕏 @DrJimFan",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/hardmaru": {
       "name": "𝕏 @hardmaru",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/LumaLabsAI": {
       "name": "𝕏 @LumaLabsAI",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "http://localhost:1200/twitter/user/huggingface": {
       "name": "𝕏 @huggingface",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 503"
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "HTTP 429"
     },
     "https://rss.arxiv.org/rss/cs.MA": {
       "name": "arXiv Multiagent Systems",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "empty feed"
     },
     "https://rss.arxiv.org/rss/cs.CL": {
       "name": "arXiv Computation and Language",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "empty feed"
     },
     "https://rss.arxiv.org/rss/cs.LG": {
       "name": "arXiv Machine Learning",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "empty feed"
     },
     "https://rss.arxiv.org/rss/cs.CR": {
       "name": "arXiv Cryptography and Security",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "empty feed"
     },
     "https://rss.arxiv.org/rss/cs.CV": {
       "name": "arXiv Computer Vision",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "empty feed"
     },
     "https://rss.arxiv.org/rss/cs.SD": {
       "name": "arXiv Sound",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "empty feed"
     },
     "https://rss.arxiv.org/rss/eess.AS": {
       "name": "arXiv Audio and Speech Processing",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
+      "lastError": "empty feed"
+    },
+    "https://refactoringenglish.com/index.xml": {
+      "name": "refactoringenglish.com",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-16T01:53:44.476Z",
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
+      "lastError": "timeout"
+    },
+    "https://mjg59.dreamwidth.org/data/rss": {
+      "name": "mjg59.dreamwidth.org",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
+      "lastError": "timeout"
+    },
+    "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
+      "name": "r/LocalLLaMA",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
+      "lastError": "HTTP 429"
+    },
+    "https://rss.arxiv.org/rss/cs.AI": {
+      "name": "arXiv Artificial Intelligence",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-08-17T01:50:58.950Z",
       "lastError": "empty feed"
     }
   }
