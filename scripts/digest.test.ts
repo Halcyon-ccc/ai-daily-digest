@@ -15,6 +15,7 @@ import {
   extractTopDigestHistory,
   getGenericRankingAdjustment,
   getResearchAttention,
+  isAIQualifiedForGeneric,
   isLowInformationGeneratedSummary,
   isSameDigestEvent,
   loadRecentDigestHistory,
@@ -531,6 +532,9 @@ describe('AI scoring batches', () => {
         return JSON.stringify({
           results: indices.map(index => ({
             index,
+            aiRelevance: index < 2 ? 9 : 1,
+            aiRelation: index < 2 ? 'direct' : 'none',
+            aiEvidence: index < 2 ? '文章直接讨论 AI agent。' : '',
             relevance: 8,
             quality: 8,
             timeliness: 8,
@@ -577,6 +581,9 @@ describe('AI scoring batches', () => {
         return JSON.stringify({
           results: [{
             index: 0,
+            aiRelevance: 9,
+            aiRelation: 'direct',
+            aiEvidence: '文章直接讨论生产级多智能体系统。',
             relevance: 8,
             quality: 8,
             timeliness: 8,
@@ -612,6 +619,54 @@ describe('AI scoring batches', () => {
     expect(projectPrompts[0]).not.toContain('### ocr-product:');
     expect(projectPrompts[0]).toContain('"matchType":"direct"');
     expect(projectPrompts[0]).not.toContain('### 1. 相关性');
+  });
+
+  test('requires explicit AI evidence for generic intelligence', async () => {
+    const articles = [{
+      title: 'Microsoft plugs nearly 400 security holes',
+      description: 'Microsoft patched Windows and supported software vulnerabilities.',
+      link: 'https://security.example/windows-patches',
+      pubDate: new Date(), sourceName: 'Security', sourceUrl: 'https://security.example',
+    }, {
+      title: 'Stealing reasoning traces from proprietary LLM APIs',
+      description: 'Researchers demonstrate replay attacks against encrypted LLM reasoning traces.',
+      link: 'https://ai.example/llm-security',
+      pubDate: new Date(), sourceName: 'AI Research', sourceUrl: 'https://ai.example',
+    }, {
+      title: 'Malformed model response',
+      description: 'The response omits the new AI gate fields.',
+      link: 'https://example.com/missing',
+      pubDate: new Date(), sourceName: 'Example', sourceUrl: 'https://example.com',
+    }];
+    const scores = await scoreArticlesWithAI(articles, {
+      async call(): Promise<string> {
+        return JSON.stringify({ results: [{
+          index: 0, aiRelevance: 2, aiRelation: 'none', aiEvidence: '',
+          relevance: 9, quality: 9, timeliness: 9, category: 'security', keywords: ['Microsoft', 'patch'],
+        }, {
+          index: 1, aiRelevance: 9, aiRelation: 'direct', aiEvidence: '文章研究 LLM API 推理痕迹攻击。',
+          relevance: 8, quality: 8, timeliness: 8, category: 'security', keywords: ['LLM', 'security'],
+        }, {
+          index: 2,
+          relevance: 10, quality: 10, timeliness: 10, category: 'engineering', keywords: ['software'],
+        }] });
+      },
+    }, []);
+
+    expect(isAIQualifiedForGeneric(scores.get(0)!, articles[0])).toBe(false);
+    expect(isAIQualifiedForGeneric(scores.get(1)!, articles[1])).toBe(true);
+    expect(isAIQualifiedForGeneric(scores.get(2)!, articles[2])).toBe(false);
+    expect(isAIQualifiedForGeneric({
+      aiRelevance: 9,
+      aiRelation: 'enabling',
+      aiEvidence: '模型错误地声称普通补丁影响 AI。',
+    }, articles[0])).toBe(false);
+    expect(isAIQualifiedForGeneric({
+      aiRelevance: 8,
+      aiRelation: 'direct',
+      aiEvidence: '文章讨论 ChatGPT 产品变化。',
+    }, { title: 'Testing ads in ChatGPT', description: 'A new ChatGPT product experiment.' })).toBe(true);
+    expect(scores.get(0)?.relevance).toBe(9);
   });
 });
 

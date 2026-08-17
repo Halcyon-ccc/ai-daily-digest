@@ -223,6 +223,7 @@ type VerificationStatus = 'first-party' | 'secondary' | 'traceable-secondary' | 
 type ProjectSelectionPreset = 'strict' | 'balanced' | 'broad';
 type ResearchMode = 'disabled' | 'section' | 'replace-generic' | 'hybrid';
 type ProjectMatchType = 'direct' | 'transferable' | 'adjacent';
+type AIRelation = 'direct' | 'enabling' | 'none';
 
 interface FeedSource {
   name: string;
@@ -350,12 +351,28 @@ interface SourceHealthFile {
 }
 
 interface ArticleScore {
+  aiRelevance: number;
+  aiRelation: AIRelation;
+  aiEvidence: string;
   relevance: number;
   quality: number;
   timeliness: number;
   category: CategoryId;
   keywords: string[];
   projectMatches: ProjectMatch[];
+}
+
+const MIN_GENERIC_AI_RELEVANCE = 6;
+const EXPLICIT_AI_CONTEXT_REGEX = /\b(?:ai|artificial intelligence|machine learning|deep learning|generative ai|ai systems?|ai models?|ai agents?|agentic|llms?|large language models?|language models?|foundation models?|reasoning models?|multimodal|vision[- ]language|text[- ]to[- ]image|diffusion models?|transformers?|neural networks?|speech recognition|automatic speech recognition|asr|optical character recognition|ocr|model (?:training|inference|serving|release|benchmark|evaluation|weights?|parameters?)|\d+(?:\.\d+)?[bm]\s+(?:parameter )?models?|training (?:cluster|pipeline)|inference (?:cluster|service|server)|prompt injection|jailbreak|tool calling|chatgpt|claude|gemini|copilot|grok|deepseek|llama|mistral|nemotron|pytorch|tensorflow|hugging face|cuda)\b|人工智能|机器学习|深度学习|大模型|语言模型|基础模型|推理模型|多模态|智能体|模型训练|模型推理|推理服务|提示注入|越狱|工具调用|语音识别|文档理解|计算机视觉/i;
+
+export function isAIQualifiedForGeneric(
+  score: Pick<ArticleScore, 'aiRelevance' | 'aiRelation' | 'aiEvidence'>,
+  article?: Pick<Article, 'title' | 'description'>
+): boolean {
+  return score.aiRelevance >= MIN_GENERIC_AI_RELEVANCE
+    && (score.aiRelation === 'direct' || score.aiRelation === 'enabling')
+    && score.aiEvidence.trim().length > 0
+    && (!article || EXPLICIT_AI_CONTEXT_REGEX.test(`${article.title} ${article.description}`));
 }
 
 function getProjectMatchType(match: ProjectMatch): Exclude<ProjectMatchType, 'adjacent'> | 'adjacent' {
@@ -1633,6 +1650,9 @@ function validateArticleScore(
   return {
     index,
     score: {
+      aiRelevance: clampScore(record.aiRelevance),
+      aiRelation: record.aiRelation === 'direct' || record.aiRelation === 'enabling' ? record.aiRelation : 'none',
+      aiEvidence: truncateText(record.aiEvidence, 180),
       relevance: clampScore(record.relevance),
       quality: clampScore(record.quality),
       timeliness: clampScore(record.timeliness),
@@ -1654,17 +1674,36 @@ function buildScoringPrompt(
     `Index ${a.index}: [${a.sourceName}] ${a.title}\n${a.description.slice(0, 300)}`
   ).join('\n\n---\n\n');
 
-  return `你是一个技术内容策展人，正在为一份面向技术爱好者的每日精选摘要筛选文章。
+  return `你是 AI 技术情报编辑，正在为一份以人工智能为核心的每日精选筛选文章。
 
-请对以下文章进行三个维度的评分（1-10 整数，10 分最高），并为每篇文章分配一个分类标签和提取 2-4 个关键词。
+先判断文章与 AI 的关系，再进行三个维度的评分（1-10 整数，10 分最高），并分配分类标签和提取 2-4 个关键词。
+
+## AI 主题准入
+
+每篇文章必须返回：
+- aiRelevance：文章与 AI、机器学习、LLM、Agent、多模态、语音、视觉、模型训练/推理/部署的相关程度，1-10。
+- aiRelation：只能是 direct、enabling 或 none。
+- aiEvidence：用中文引用或概括标题/摘要中能证明 AI 关系的具体信息，最多 100 字；没有明确证据时返回空字符串。
+
+aiRelation 定义：
+- direct：AI 是文章核心主题，例如模型、Agent、AI 产品、AI 安全、AI 政策、多模态或机器学习研究。
+- enabling：文章明确影响 AI 系统的训练、推理、部署、数据、算力或供应链，例如 GPU 漏洞明确影响训练集群、PyTorch 供应链攻击、推理服务数据隔离故障。
+- none：只是普通软件、安全、商业、硬件或互联网资讯，和 AI 没有明确关系。
+
+严格规则：
+1. 公司本身从事 AI，不能让它的所有新闻都成为 AI 新闻。
+2. 出现 Microsoft、Google、NVIDIA、OpenAI 等公司名，不能单独构成 AI 证据。
+3. 普通 Windows/macOS/Linux 漏洞、软件补丁、网站攻击、数据库或浏览器更新，若未明确影响 AI 系统，必须标为 none，aiRelevance 不得高于 3。
+4. 不得根据常识补充标题和摘要中没有写出的 AI 联系。
+5. 只有 direct 或 enabling 且 aiRelevance >= ${MIN_GENERIC_AI_RELEVANCE}、aiEvidence 非空的文章，才有资格进入通用 AI 情报。
 
 ## 评分维度
 
-### 1. 相关性 (relevance) - 对技术/编程/AI/互联网从业者的价值
-- 10: 所有技术人都应该知道的重大事件/突破
-- 7-9: 对大部分技术从业者有价值
-- 4-6: 对特定技术领域有价值
-- 1-3: 与技术行业关联不大
+### 1. 相关性 (relevance) - 对 AI 技术从业者的价值
+- 10: AI 领域重大事件或突破
+- 7-9: 对多数 AI 从业者有价值
+- 4-6: 对特定 AI 方向有价值
+- 1-3: 对 AI 从业者价值有限或与 AI 无关
 
 ### 2. 质量 (quality) - 文章本身的深度和写作质量
 - 10: 深度分析，原创洞见，引用丰富
@@ -1699,6 +1738,9 @@ ${articlesList}
   "results": [
     {
       "index": 0,
+      "aiRelevance": 8,
+      "aiRelation": "direct",
+      "aiEvidence": "文章直接讨论大模型推理服务的性能优化。",
       "relevance": 8,
       "quality": 7,
       "timeliness": 9,
@@ -1845,7 +1887,10 @@ async function scoreArticlePass(
         + `using ${bestScores.size} recovered result(s) and defaults for ${missingItems.length}`
       );
       for (const item of missingItems) {
-        allScores.set(item.index, { relevance: 5, quality: 5, timeliness: 5, category: 'other', keywords: [], projectMatches: [] });
+        allScores.set(item.index, {
+          aiRelevance: 1, aiRelation: 'none', aiEvidence: '',
+          relevance: 5, quality: 5, timeliness: 5, category: 'other', keywords: [], projectMatches: [],
+        });
       }
     });
     
@@ -3708,7 +3753,10 @@ async function main(): Promise<void> {
   const scores = await scoreArticlesWithAI(scoringArticles, aiClient, projects);
   
   const scoredArticles = scoringArticles.map((article, index) => {
-    const score = scores.get(index) || { relevance: 5, quality: 5, timeliness: 5, category: 'other' as CategoryId, keywords: [], projectMatches: [] };
+    const score = scores.get(index) || {
+      aiRelevance: 1, aiRelation: 'none' as AIRelation, aiEvidence: '',
+      relevance: 5, quality: 5, timeliness: 5, category: 'other' as CategoryId, keywords: [], projectMatches: [],
+    };
     const genericScore = getGenericScore(score);
     const projectAwareScore = getProjectAwareScore(score);
     return {
@@ -3721,6 +3769,26 @@ async function main(): Promise<void> {
   });
   
   const projectMatchedCount = scoredArticles.filter(article => article.breakdown.projectMatches.length > 0).length;
+  const genericAIQualifiedArticles = scoredArticles.filter(article => isAIQualifiedForGeneric(article.breakdown, article));
+  const genericAIRejectedCount = scoredArticles.length - genericAIQualifiedArticles.length;
+  const aiRelationCounts = scoredArticles.reduce((counts, article) => {
+    counts[article.breakdown.aiRelation]++;
+    return counts;
+  }, { direct: 0, enabling: 0, none: 0 } as Record<AIRelation, number>);
+  console.log(
+    `[digest] Generic AI gate: qualified=${genericAIQualifiedArticles.length}/${scoredArticles.length}, `
+    + `rejected=${genericAIRejectedCount}, direct=${aiRelationCounts.direct}, `
+    + `enabling=${aiRelationCounts.enabling}, none=${aiRelationCounts.none}, `
+    + `threshold=${MIN_GENERIC_AI_RELEVANCE}`
+  );
+  const genericAIRejectedSamples = scoredArticles
+    .filter(article => !isAIQualifiedForGeneric(article.breakdown, article))
+    .sort((a, b) => b.genericScore - a.genericScore)
+    .slice(0, 5)
+    .map(article => `${article.breakdown.aiRelation}/${article.breakdown.aiRelevance}:${article.title.slice(0, 80)}`);
+  if (genericAIRejectedSamples.length > 0) {
+    console.log(`[digest] Generic AI gate rejected samples: ${genericAIRejectedSamples.join(' | ')}`);
+  }
   if (projects.length > 0) {
     console.log(`[digest] Project-matched articles: ${projectMatchedCount}/${scoredArticles.length}`);
   }
@@ -3762,8 +3830,8 @@ async function main(): Promise<void> {
     projectCandidates.map(({ article, matches }) => [article, matches] as const)
   );
   const rankingPool = researchPolicy.mode === 'section'
-    ? scoredArticles.filter(article => !researchCandidates.some(candidate => isSameDigestEvent(article, candidate.article)))
-    : scoredArticles;
+    ? genericAIQualifiedArticles.filter(article => !researchCandidates.some(candidate => isSameDigestEvent(article, candidate.article)))
+    : genericAIQualifiedArticles;
   let topArticles = rankArticles(
     rankingPool,
     Math.min(scoredArticles.length, topN),
@@ -3776,7 +3844,7 @@ async function main(): Promise<void> {
       genericMaxItems: digestPolicy.genericMaxItems,
     }
   );
-  const replacementPool = scoredArticles.filter(article =>
+  const replacementPool = genericAIQualifiedArticles.filter(article =>
     !topArticles.some(selected => isSameDigestEvent(article, selected))
     && !prioritizedProjectArticles.some(selected => isSameDigestEvent(article, selected))
     && !researchCandidates.some(candidate => isSameDigestEvent(article, candidate.article))
@@ -3880,7 +3948,7 @@ async function main(): Promise<void> {
   }
 
   const supplementalCandidates = selectSupplementalViewCandidates(
-    scoredArticles,
+    genericAIQualifiedArticles,
     topArticles,
     recentDigestHistory,
     [...topArticles, ...projectCandidates.map(candidate => candidate.article), ...researchCandidates.map(candidate => candidate.article), ...rejectedTopArticles]
@@ -3979,6 +4047,7 @@ async function main(): Promise<void> {
 
   console.log(
     `[digest] Selection funnel: recent=${recentArticles.length} -> AI-scored=${scoredArticles.length} `
+    + `-> generic-AI-qualified=${genericAIQualifiedArticles.length} `
     + `-> model-project-matched=${projectMatchedCount} -> project-selected=${projectIntelligenceArticles.length} `
     + `-> research-selected=${researchIntelligenceArticles.length} -> Top=${finalArticles.length} `
     + `-> supplemental=${supplementalViewArticles.length}`
