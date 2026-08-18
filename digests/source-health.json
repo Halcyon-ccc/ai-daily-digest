@@ -255,38 +255,32 @@
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-08-17T10:15:42.237Z",
-      "lastError": "HTTP 429"
-    },
-    "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
-      "name": "r/StableDiffusion",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-08-17T10:15:42.237Z",
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-08-18T01:46:07.814Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
       "name": "r/LocalLLaMA",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-17T10:15:42.237Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-08-18T01:46:07.814Z",
       "lastError": "HTTP 429"
-    },
-    "https://shkspr.mobi/blog/feed/": {
-      "name": "shkspr.mobi",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-17T10:15:42.237Z",
-      "lastError": "timeout"
-    },
-    "https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/feed.xml": {
-      "name": "chiark.greenend.org.uk/~sgtatham",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-17T10:15:42.237Z",
-      "lastError": "timeout"
     },
     "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
       "name": "r/midjourney",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-08-18T01:46:07.814Z",
+      "lastError": "HTTP 429"
+    },
+    "https://www.geoffreylitt.com/feed.xml": {
+      "name": "geoffreylitt.com",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-17T10:15:42.237Z",
+      "lastAttempt": "2026-08-18T01:46:07.814Z",
+      "lastError": "timeout"
+    },
+    "https://www.reddit.com/r/singularity/top/.rss?t=day": {
+      "name": "r/singularity",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-08-18T01:46:07.814Z",
       "lastError": "HTTP 429"
     }
   }
