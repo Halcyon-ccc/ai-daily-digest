@@ -249,50 +249,44 @@
     },
     "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
       "name": "r/midjourney",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-21T01:52:41.936Z",
-      "lastError": "HTTP 429"
-    },
-    "https://www.reddit.com/r/singularity/top/.rss?t=day": {
-      "name": "r/singularity",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-08-21T01:52:41.936Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-22T01:45:28.935Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-08-21T01:52:41.936Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-08-22T01:45:28.935Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-21T01:52:41.936Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-08-22T01:45:28.935Z",
       "lastError": "HTTP 429"
-    },
-    "https://www.seangoedecke.com/rss.xml": {
-      "name": "seangoedecke.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-21T01:52:41.936Z",
-      "lastError": "timeout"
-    },
-    "https://www.geoffreylitt.com/feed.xml": {
-      "name": "geoffreylitt.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-21T01:52:41.936Z",
-      "lastError": "The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()"
     },
     "https://mjg59.dreamwidth.org/data/rss": {
       "name": "mjg59.dreamwidth.org",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-21T01:52:41.936Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-08-22T01:45:28.935Z",
       "lastError": "timeout"
     },
     "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
       "name": "r/LocalLLaMA",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-08-22T01:45:28.935Z",
+      "lastError": "HTTP 429"
+    },
+    "https://shkspr.mobi/blog/feed/": {
+      "name": "shkspr.mobi",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-21T01:52:41.936Z",
+      "lastAttempt": "2026-08-22T01:45:28.935Z",
+      "lastError": "HTTP 415"
+    },
+    "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
+      "name": "r/MachineLearning",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-08-22T01:45:28.935Z",
       "lastError": "HTTP 429"
     }
   }
