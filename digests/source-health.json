@@ -241,94 +241,52 @@
       "lastAttempt": "2026-08-24T01:53:10.173Z",
       "lastError": "HTTP 503"
     },
-    "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
-      "name": "r/StableDiffusion",
-      "consecutiveFailures": 6,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
-      "lastError": "HTTP 429"
-    },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-25T01:47:15.171Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
       "name": "r/LocalLLaMA",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-08-25T01:47:15.171Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-08-25T01:47:15.171Z",
       "lastError": "HTTP 429"
     },
     "https://refactoringenglish.com/index.xml": {
       "name": "refactoringenglish.com",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-08-25T01:47:15.171Z",
       "lastError": "timeout"
     },
     "https://www.reddit.com/r/singularity/top/.rss?t=day": {
       "name": "r/singularity",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-08-25T01:47:15.171Z",
       "lastError": "HTTP 429"
-    },
-    "https://rss.arxiv.org/rss/cs.MA": {
-      "name": "arXiv Multiagent Systems",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.AI": {
-      "name": "arXiv Artificial Intelligence",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.CL": {
-      "name": "arXiv Computation and Language",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.LG": {
-      "name": "arXiv Machine Learning",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.CR": {
-      "name": "arXiv Cryptography and Security",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.CV": {
-      "name": "arXiv Computer Vision",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.SD": {
-      "name": "arXiv Sound",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/eess.AS": {
-      "name": "arXiv Audio and Speech Processing",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
-      "lastError": "empty feed"
     },
     "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
       "name": "r/midjourney",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-08-25T01:47:15.171Z",
+      "lastError": "HTTP 429"
+    },
+    "https://blog.jim-nielsen.com/feed.xml": {
+      "name": "blog.jim-nielsen.com",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-24T01:53:10.173Z",
+      "lastAttempt": "2026-08-25T01:47:15.171Z",
+      "lastError": "The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()"
+    },
+    "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
+      "name": "r/comfyui",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-08-25T01:47:15.171Z",
       "lastError": "HTTP 429"
     }
   }
