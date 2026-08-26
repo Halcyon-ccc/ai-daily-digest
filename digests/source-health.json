@@ -243,51 +243,51 @@
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
-      "consecutiveFailures": 6,
-      "lastAttempt": "2026-08-25T01:47:15.171Z",
+      "consecutiveFailures": 7,
+      "lastAttempt": "2026-08-26T01:52:56.418Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
       "name": "r/LocalLLaMA",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-25T01:47:15.171Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-08-26T01:52:56.418Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-08-25T01:47:15.171Z",
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-08-26T01:52:56.418Z",
       "lastError": "HTTP 429"
     },
     "https://refactoringenglish.com/index.xml": {
       "name": "refactoringenglish.com",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-08-25T01:47:15.171Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-08-26T01:52:56.418Z",
       "lastError": "timeout"
     },
     "https://www.reddit.com/r/singularity/top/.rss?t=day": {
       "name": "r/singularity",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-08-25T01:47:15.171Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-08-26T01:52:56.418Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
       "name": "r/midjourney",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-08-25T01:47:15.171Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-08-26T01:52:56.418Z",
       "lastError": "HTTP 429"
-    },
-    "https://blog.jim-nielsen.com/feed.xml": {
-      "name": "blog.jim-nielsen.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-25T01:47:15.171Z",
-      "lastError": "The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()"
     },
     "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
       "name": "r/comfyui",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-25T01:47:15.171Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-08-26T01:52:56.418Z",
       "lastError": "HTTP 429"
+    },
+    "https://www.seangoedecke.com/rss.xml": {
+      "name": "seangoedecke.com",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-08-26T01:52:56.418Z",
+      "lastError": "timeout"
     }
   }
 }
