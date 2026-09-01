@@ -255,8 +255,8 @@
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 7,
-      "lastAttempt": "2026-08-28T11:15:07.645Z",
+      "consecutiveFailures": 8,
+      "lastAttempt": "2026-09-01T04:57:01.528Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
@@ -267,15 +267,39 @@
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-08-31T05:22:25.340Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-09-01T04:57:01.528Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
       "name": "r/comfyui",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-08-31T05:22:25.340Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-09-01T04:57:01.528Z",
       "lastError": "HTTP 429"
+    },
+    "https://www.geoffreylitt.com/feed.xml": {
+      "name": "geoffreylitt.com",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-09-01T04:57:01.528Z",
+      "lastError": "timeout"
+    },
+    "https://refactoringenglish.com/index.xml": {
+      "name": "refactoringenglish.com",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-09-01T04:57:01.528Z",
+      "lastError": "timeout"
+    },
+    "https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/feed.xml": {
+      "name": "chiark.greenend.org.uk/~sgtatham",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-09-01T04:57:01.528Z",
+      "lastError": "timeout"
+    },
+    "https://mjg59.dreamwidth.org/data/rss": {
+      "name": "mjg59.dreamwidth.org",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-09-01T04:57:01.528Z",
+      "lastError": "HTTP 504"
     }
   }
 }
