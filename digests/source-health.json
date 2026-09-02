@@ -241,12 +241,6 @@
       "lastAttempt": "2026-08-31T05:22:25.340Z",
       "lastError": "HTTP 503"
     },
-    "https://www.reddit.com/r/programming/top/.rss?t=day": {
-      "name": "r/programming",
-      "consecutiveFailures": 8,
-      "lastAttempt": "2026-08-29T06:58:12.187Z",
-      "lastError": "HTTP 429"
-    },
     "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
       "name": "r/LocalLLaMA",
       "consecutiveFailures": 8,
@@ -267,39 +261,39 @@
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
-      "consecutiveFailures": 6,
-      "lastAttempt": "2026-09-01T04:57:01.528Z",
+      "consecutiveFailures": 7,
+      "lastAttempt": "2026-09-02T04:20:18.658Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
       "name": "r/comfyui",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-01T04:57:01.528Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-09-02T04:20:18.658Z",
       "lastError": "HTTP 429"
-    },
-    "https://www.geoffreylitt.com/feed.xml": {
-      "name": "geoffreylitt.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-01T04:57:01.528Z",
-      "lastError": "timeout"
     },
     "https://refactoringenglish.com/index.xml": {
       "name": "refactoringenglish.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-01T04:57:01.528Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-09-02T04:20:18.658Z",
       "lastError": "timeout"
     },
-    "https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/feed.xml": {
-      "name": "chiark.greenend.org.uk/~sgtatham",
+    "https://www.seangoedecke.com/rss.xml": {
+      "name": "seangoedecke.com",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-01T04:57:01.528Z",
+      "lastAttempt": "2026-09-02T04:20:18.658Z",
+      "lastError": "The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()"
+    },
+    "https://anildash.com/feed.xml": {
+      "name": "anildash.com",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-09-02T04:20:18.658Z",
       "lastError": "timeout"
     },
-    "https://mjg59.dreamwidth.org/data/rss": {
-      "name": "mjg59.dreamwidth.org",
+    "https://www.reddit.com/r/singularity/top/.rss?t=day": {
+      "name": "r/singularity",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-01T04:57:01.528Z",
-      "lastError": "HTTP 504"
+      "lastAttempt": "2026-09-02T04:20:18.658Z",
+      "lastError": "HTTP 429"
     }
   }
 }
