@@ -255,8 +255,8 @@
     },
     "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
       "name": "r/midjourney",
-      "consecutiveFailures": 7,
-      "lastAttempt": "2026-08-30T05:15:04.239Z",
+      "consecutiveFailures": 8,
+      "lastAttempt": "2026-09-03T04:14:31.661Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
@@ -265,34 +265,16 @@
       "lastAttempt": "2026-09-02T04:20:18.658Z",
       "lastError": "HTTP 429"
     },
-    "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
-      "name": "r/comfyui",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-09-02T04:20:18.658Z",
-      "lastError": "HTTP 429"
-    },
-    "https://refactoringenglish.com/index.xml": {
-      "name": "refactoringenglish.com",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-02T04:20:18.658Z",
-      "lastError": "timeout"
-    },
-    "https://www.seangoedecke.com/rss.xml": {
-      "name": "seangoedecke.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-02T04:20:18.658Z",
-      "lastError": "The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()"
-    },
-    "https://anildash.com/feed.xml": {
-      "name": "anildash.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-02T04:20:18.658Z",
-      "lastError": "timeout"
-    },
     "https://www.reddit.com/r/singularity/top/.rss?t=day": {
       "name": "r/singularity",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-09-03T04:14:31.661Z",
+      "lastError": "HTTP 429"
+    },
+    "https://www.reddit.com/r/programming/top/.rss?t=day": {
+      "name": "r/programming",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-02T04:20:18.658Z",
+      "lastAttempt": "2026-09-03T04:14:31.661Z",
       "lastError": "HTTP 429"
     }
   }
