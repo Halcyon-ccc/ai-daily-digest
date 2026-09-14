@@ -44,6 +44,8 @@ const RESEARCH_SOURCE_SOFT_LIMIT = 2;
 const SOURCE_HEALTH_WARNING_FAILURES = 3;
 const SOURCE_HEALTH_PAUSE_FAILURES = 7;
 const SOURCE_HEALTH_RETRY_INTERVAL_MS = 72 * 60 * 60 * 1000;
+const MAX_RESEARCH_CANDIDATES = 15;
+const DEFAULT_RESEARCH_DAYS = 7;
 const AGGREGATOR_HOSTS = new Set([
   'news.ycombinator.com',
   'reddit.com',
@@ -369,10 +371,14 @@ export function isAIQualifiedForGeneric(
   score: Pick<ArticleScore, 'aiRelevance' | 'aiRelation' | 'aiEvidence'>,
   article?: Pick<Article, 'title' | 'description'>
 ): boolean {
-  return score.aiRelevance >= MIN_GENERIC_AI_RELEVANCE
-    && (score.aiRelation === 'direct' || score.aiRelation === 'enabling')
-    && score.aiEvidence.trim().length > 0
-    && (!article || EXPLICIT_AI_CONTEXT_REGEX.test(`${article.title} ${article.description}`));
+  if (score.aiRelevance < MIN_GENERIC_AI_RELEVANCE) return false;
+  if (score.aiEvidence.trim().length === 0) return false;
+  if (score.aiRelation === 'direct') return true;
+  if (score.aiRelation !== 'enabling') return false;
+
+  // Trust the model's direct judgment. For enabling relations, require an
+  // explicit AI/system signal so ordinary software or security news cannot slip in.
+  return !article || EXPLICIT_AI_CONTEXT_REGEX.test(`${article.title} ${article.description}`);
 }
 
 function getProjectMatchType(match: ProjectMatch): Exclude<ProjectMatchType, 'adjacent'> | 'adjacent' {
@@ -3591,6 +3597,137 @@ function generateDigestReport(articles: ScoredArticle[], highlights: string, sta
 // CLI
 // ============================================================================
 
+function researchTokens(value: string): string[] {
+  const normalized = value.toLowerCase();
+  const latin = normalized.match(/[a-z0-9]+/g) || [];
+  const cjk = normalized.match(/[\u4e00-\u9fff]/g) || [];
+  const bigrams: string[] = [];
+  for (let i = 0; i < cjk.length - 1; i++) {
+    bigrams.push(`${cjk[i]}${cjk[i + 1]}`);
+  }
+  return [...latin, ...bigrams].filter(token => token.length >= 2);
+}
+
+function researchKeywordScore(article: Pick<Article, 'title' | 'description'>, queryTokens: Set<string>): number {
+  const tokens = new Set(researchTokens(`${article.title} ${article.description}`));
+  let score = 0;
+  for (const token of queryTokens) {
+    if (tokens.has(token)) score++;
+  }
+  return score;
+}
+
+async function runTopicResearch(options: {
+  topic: string;
+  days: number;
+  lang: 'zh' | 'en';
+  outputPath: string;
+  aiClient: AIClient;
+}): Promise<void> {
+  const { topic, days, lang, outputPath, aiClient } = options;
+  console.log('[research] === On-demand Deep Research ===');
+  console.log(`[research] Topic: ${topic}`);
+  console.log(`[research] Lookback: ${days} days`);
+  console.log(`[research] Output: ${outputPath}`);
+
+  const configuredSources = await loadConfiguredSources();
+  const xFeeds = buildXFeeds();
+  const allFeeds = mergeFeedSources(RSS_FEEDS, configuredSources, xFeeds);
+  const sourceHealthPath = `${dirname(outputPath)}/research-source-health.json`;
+
+  console.log(`[research] Fetching ${allFeeds.length} sources...`);
+  const allArticles = await fetchAllFeeds(allFeeds, sourceHealthPath);
+  if (allArticles.length === 0) {
+    console.error('[research] Error: No articles fetched from any source.');
+    process.exit(1);
+  }
+
+  const cutoffTime = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const recentArticles = allArticles.filter(article => article.pubDate.getTime() > cutoffTime.getTime());
+  const seenResearchUrls = new Set<string>();
+  const uniqueRecentArticles = recentArticles.filter(article => {
+    const normalized = normalizeArticleUrl(article.link);
+    if (seenResearchUrls.has(normalized)) return false;
+    seenResearchUrls.add(normalized);
+    return true;
+  });
+  console.log(
+    `[research] Found ${recentArticles.length} articles within last ${days} days; `
+    + `${uniqueRecentArticles.length} unique after link deduplication`
+  );
+
+  const queryTokens = new Set(researchTokens(topic));
+  if (queryTokens.size === 0) {
+    console.error('[research] Error: Topic contains no usable keywords.');
+    process.exit(1);
+  }
+
+  const candidates = uniqueRecentArticles
+    .map(article => ({ article, score: researchKeywordScore(article, queryTokens) }))
+    .filter(item => item.score > 0)
+    .sort((a, b) =>
+      b.score - a.score
+      || b.article.pubDate.getTime() - a.article.pubDate.getTime()
+      || a.article.title.localeCompare(b.article.title)
+    )
+    .slice(0, MAX_RESEARCH_CANDIDATES);
+
+  if (candidates.length === 0) {
+    console.error('[research] Error: No keyword-matched articles found. Try a broader topic or longer lookback.');
+    process.exit(1);
+  }
+
+  const sourceList = candidates.map(({ article }, index) => {
+    const date = article.pubDate.getTime() > 0
+      ? article.pubDate.toISOString().slice(0, 10)
+      : '未知日期';
+    return `${index + 1}. [${article.title}](${article.link}) — ${article.sourceName} (${date})\n   ${stripHtml(article.description).slice(0, 240)}`;
+  }).join('\n\n');
+
+  const languageInstruction = lang === 'zh'
+    ? '用中文输出 Markdown。'
+    : 'Write the brief in English Markdown.';
+  const prompt = `你是技术情报研究员。请基于下面提供的资料，完成一份关于「${topic}」的深度调研简报。
+
+要求：
+1. 输出结构包含：结论摘要、关键发现、值得关注的技术信号、分歧或不确定点、建议下一步。
+2. 只使用资料中明确存在的信息，不得补充资料之外的链接、数字或结论。
+3. 引用资料时使用编号，例如 [1]、[3]。
+4. 无法确定的内容要明确写“待核实”。
+5. ${languageInstruction}
+
+资料：
+
+${sourceList}
+
+请直接输出简报正文，不要输出分析过程。`;
+
+  console.log(`[research] Synthesizing ${candidates.length} matched articles...`);
+  const synthesis = await aiClient.call(prompt, 'highlights');
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const report = `# 🔬 主题深度调研 — ${topic}
+
+> 生成日期：${dateStr}
+> 回溯范围：最近 ${days} 天
+> 分析资料：${candidates.length} 条
+
+${synthesis.trim()}
+
+---
+
+## 参考资料
+
+${sourceList}
+
+*本简报仅基于项目已有信息源与 DeepSeek 推理生成，未进行外部实时搜索；关键事实请人工核实。*
+`;
+
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, report);
+  console.log(`[research] ✅ Report: ${outputPath}`);
+}
+
 function printUsage(): never {
   console.log(`AI Daily Digest - AI-powered digest from 110+ tech and research sources
 
@@ -3602,6 +3739,8 @@ Options:
   --top-n <n>     Number of top articles to include (default: 15)
   --lang <lang>   Summary language: zh or en (default: zh)
   --output <path> Output file path (default: ./digest-YYYYMMDD.md)
+  --research-topic <query>  Generate an on-demand topic research brief instead of the daily digest
+  --research-days <n>       Topic lookback window in days (default: 7)
   --help          Show this help
 
 Environment:
@@ -3624,6 +3763,7 @@ Environment:
 Examples:
   bun scripts/digest.ts --hours 24 --top-n 10 --lang zh
   bun scripts/digest.ts --hours 72 --top-n 20 --lang en --output ./my-digest.md
+  bun scripts/digest.ts --research-topic "multi-agent architecture" --research-days 14 --output ./research.md
 `);
   process.exit(0);
 }
@@ -3636,6 +3776,8 @@ async function main(): Promise<void> {
   let topN = 15;
   let lang: 'zh' | 'en' = 'zh';
   let outputPath = '';
+  let researchTopic = '';
+  let researchDays = DEFAULT_RESEARCH_DAYS;
   
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -3647,6 +3789,10 @@ async function main(): Promise<void> {
       lang = args[++i] as 'zh' | 'en';
     } else if (arg === '--output' && args[i + 1]) {
       outputPath = args[++i]!;
+    } else if (arg === '--research-topic' && args[i + 1]) {
+      researchTopic = args[++i]!;
+    } else if (arg === '--research-days' && args[i + 1]) {
+      researchDays = Math.max(1, parseInt(args[++i]!, 10) || DEFAULT_RESEARCH_DAYS);
     }
   }
   
@@ -3677,7 +3823,12 @@ async function main(): Promise<void> {
   
   if (!outputPath) {
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    outputPath = `./digest-${dateStr}.md`;
+    outputPath = researchTopic ? `./research-${dateStr}.md` : `./digest-${dateStr}.md`;
+  }
+
+  if (researchTopic) {
+    await runTopicResearch({ topic: researchTopic, days: researchDays, lang, outputPath, aiClient });
+    return;
   }
   
   console.log(`[digest] === AI Daily Digest ===`);

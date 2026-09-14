@@ -666,6 +666,11 @@ describe('AI scoring batches', () => {
       aiRelation: 'direct',
       aiEvidence: '文章讨论 ChatGPT 产品变化。',
     }, { title: 'Testing ads in ChatGPT', description: 'A new ChatGPT product experiment.' })).toBe(true);
+    expect(isAIQualifiedForGeneric({
+      aiRelevance: 10,
+      aiRelation: 'direct',
+      aiEvidence: '模型直接评估 Qwen 3.8 27B 的推理行为。',
+    }, { title: 'Qwen 3.8 27B is excellent, but it defaults to overthinking things', description: 'A model quality evaluation.' })).toBe(true);
     expect(scores.get(0)?.relevance).toBe(9);
   });
 });
