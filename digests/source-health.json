@@ -247,12 +247,6 @@
       "lastAttempt": "2026-09-20T04:45:59.022Z",
       "lastError": "HTTP 429"
     },
-    "https://www.reddit.com/r/singularity/top/.rss?t=day": {
-      "name": "r/singularity",
-      "consecutiveFailures": 8,
-      "lastAttempt": "2026-09-18T04:32:47.691Z",
-      "lastError": "HTTP 429"
-    },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
       "consecutiveFailures": 8,
@@ -261,98 +255,32 @@
     },
     "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
       "name": "r/LocalLLaMA",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-09-21T04:46:31.531Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
       "name": "r/comfyui",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-09-21T04:46:31.531Z",
       "lastError": "HTTP 429"
-    },
-    "https://rss.arxiv.org/rss/cs.MA": {
-      "name": "arXiv Multiagent Systems",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.AI": {
-      "name": "arXiv Artificial Intelligence",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.CL": {
-      "name": "arXiv Computation and Language",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.LG": {
-      "name": "arXiv Machine Learning",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.CR": {
-      "name": "arXiv Cryptography and Security",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.CV": {
-      "name": "arXiv Computer Vision",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.SD": {
-      "name": "arXiv Sound",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/eess.AS": {
-      "name": "arXiv Audio and Speech Processing",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
-      "lastError": "empty feed"
-    },
-    "https://shkspr.mobi/blog/feed/": {
-      "name": "shkspr.mobi",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
-      "lastError": "HTTP 415"
-    },
-    "https://evanhahn.com/feed.xml": {
-      "name": "evanhahn.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
-      "lastError": "timeout"
-    },
-    "https://www.filfre.net/feed/": {
-      "name": "filfre.net",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
-      "lastError": "timeout"
-    },
-    "https://beej.us/blog/rss.xml": {
-      "name": "beej.us",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
-      "lastError": "timeout"
     },
     "https://mjg59.dreamwidth.org/data/rss": {
       "name": "mjg59.dreamwidth.org",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
-      "lastError": "timeout"
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-09-21T04:46:31.531Z",
+      "lastError": "HTTP 504"
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-09-21T04:46:31.531Z",
+      "lastError": "HTTP 429"
+    },
+    "https://www.reddit.com/r/programming/top/.rss?t=day": {
+      "name": "r/programming",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-20T04:45:59.022Z",
+      "lastAttempt": "2026-09-21T04:46:31.531Z",
       "lastError": "HTTP 429"
     }
   }
