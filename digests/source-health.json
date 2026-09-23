@@ -255,26 +255,26 @@
     },
     "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
       "name": "r/LocalLLaMA",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-09-22T04:43:42.710Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-09-23T04:37:12.088Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
       "name": "r/comfyui",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-09-22T04:43:42.710Z",
-      "lastError": "HTTP 429"
-    },
-    "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
-      "name": "r/StableDiffusion",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-09-22T04:43:42.710Z",
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-09-23T04:37:12.088Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-22T04:43:42.710Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-09-23T04:37:12.088Z",
+      "lastError": "HTTP 429"
+    },
+    "https://www.reddit.com/r/singularity/top/.rss?t=day": {
+      "name": "r/singularity",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-09-23T04:37:12.088Z",
       "lastError": "HTTP 429"
     }
   }
