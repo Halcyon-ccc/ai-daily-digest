@@ -249,8 +249,8 @@
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 9,
-      "lastAttempt": "2026-09-22T04:43:42.710Z",
+      "consecutiveFailures": 10,
+      "lastAttempt": "2026-09-25T04:46:53.005Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
@@ -261,21 +261,33 @@
     },
     "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
       "name": "r/comfyui",
-      "consecutiveFailures": 6,
-      "lastAttempt": "2026-09-24T04:36:39.296Z",
+      "consecutiveFailures": 7,
+      "lastAttempt": "2026-09-25T04:46:53.005Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-09-24T04:36:39.296Z",
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-09-25T04:46:53.005Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/singularity/top/.rss?t=day": {
       "name": "r/singularity",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-24T04:36:39.296Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-09-25T04:46:53.005Z",
       "lastError": "HTTP 429"
+    },
+    "https://mjg59.dreamwidth.org/data/rss": {
+      "name": "mjg59.dreamwidth.org",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-09-25T04:46:53.005Z",
+      "lastError": "timeout"
+    },
+    "https://hnrss.org/best": {
+      "name": "Hacker News Best",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-09-25T04:46:53.005Z",
+      "lastError": "empty feed"
     }
   }
 }
