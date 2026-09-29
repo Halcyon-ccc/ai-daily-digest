@@ -259,22 +259,22 @@
       "lastAttempt": "2026-09-28T05:13:39.886Z",
       "lastError": "HTTP 429"
     },
-    "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
-      "name": "r/StableDiffusion",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-09-28T05:13:39.886Z",
-      "lastError": "HTTP 429"
-    },
     "https://www.reddit.com/r/singularity/top/.rss?t=day": {
       "name": "r/singularity",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-28T05:13:39.886Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-09-29T05:35:34.556Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-09-29T05:35:34.556Z",
+      "lastError": "HTTP 429"
+    },
+    "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
+      "name": "r/MachineLearning",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-28T05:13:39.886Z",
+      "lastAttempt": "2026-09-29T05:35:34.556Z",
       "lastError": "HTTP 429"
     }
   }
