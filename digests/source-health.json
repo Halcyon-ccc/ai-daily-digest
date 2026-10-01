@@ -255,38 +255,32 @@
     },
     "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
       "name": "r/comfyui",
-      "consecutiveFailures": 8,
-      "lastAttempt": "2026-09-28T05:13:39.886Z",
+      "consecutiveFailures": 9,
+      "lastAttempt": "2026-10-01T05:40:38.319Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/singularity/top/.rss?t=day": {
       "name": "r/singularity",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-09-30T05:23:48.263Z",
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-10-01T05:40:38.319Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-09-30T05:23:48.263Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-10-01T05:40:38.319Z",
       "lastError": "HTTP 429"
     },
     "http://www.aaronsw.com/2002/feeds/pgessays.rss": {
       "name": "paulgraham.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-30T05:23:48.263Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-10-01T05:40:38.319Z",
       "lastError": "getaddrinfo ENOTFOUND www.aaronsw.com"
-    },
-    "https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/feed.xml": {
-      "name": "chiark.greenend.org.uk/~sgtatham",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-30T05:23:48.263Z",
-      "lastError": "timeout"
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-09-30T05:23:48.263Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-10-01T05:40:38.319Z",
       "lastError": "HTTP 429"
     }
   }
