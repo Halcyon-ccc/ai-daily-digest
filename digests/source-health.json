@@ -261,26 +261,32 @@
     },
     "https://www.reddit.com/r/singularity/top/.rss?t=day": {
       "name": "r/singularity",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-10-01T05:40:38.319Z",
-      "lastError": "HTTP 429"
-    },
-    "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
-      "name": "r/MachineLearning",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-10-01T05:40:38.319Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-10-02T05:25:25.781Z",
       "lastError": "HTTP 429"
     },
     "http://www.aaronsw.com/2002/feeds/pgessays.rss": {
       "name": "paulgraham.com",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-10-01T05:40:38.319Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-10-02T05:25:25.781Z",
       "lastError": "getaddrinfo ENOTFOUND www.aaronsw.com"
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-10-01T05:40:38.319Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-10-02T05:25:25.781Z",
+      "lastError": "HTTP 429"
+    },
+    "https://mjg59.dreamwidth.org/data/rss": {
+      "name": "mjg59.dreamwidth.org",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-02T05:25:25.781Z",
+      "lastError": "HTTP 504"
+    },
+    "https://www.reddit.com/r/programming/top/.rss?t=day": {
+      "name": "r/programming",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-02T05:25:25.781Z",
       "lastError": "HTTP 429"
     }
   }
