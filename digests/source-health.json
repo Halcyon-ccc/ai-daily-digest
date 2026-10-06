@@ -261,27 +261,33 @@
     },
     "https://www.reddit.com/r/singularity/top/.rss?t=day": {
       "name": "r/singularity",
-      "consecutiveFailures": 7,
-      "lastAttempt": "2026-10-03T05:08:41.916Z",
+      "consecutiveFailures": 8,
+      "lastAttempt": "2026-10-06T06:10:50.322Z",
       "lastError": "HTTP 429"
     },
     "http://www.aaronsw.com/2002/feeds/pgessays.rss": {
       "name": "paulgraham.com",
-      "consecutiveFailures": 6,
-      "lastAttempt": "2026-10-05T05:25:59.075Z",
+      "consecutiveFailures": 7,
+      "lastAttempt": "2026-10-06T06:10:50.322Z",
       "lastError": "empty feed"
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-10-05T05:25:59.075Z",
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-10-06T06:10:50.322Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-10-05T05:25:59.075Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-10-06T06:10:50.322Z",
       "lastError": "HTTP 429"
+    },
+    "https://mjg59.dreamwidth.org/data/rss": {
+      "name": "mjg59.dreamwidth.org",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-06T06:10:50.322Z",
+      "lastError": "timeout"
     }
   }
 }
