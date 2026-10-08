@@ -267,20 +267,26 @@
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
-      "consecutiveFailures": 6,
-      "lastAttempt": "2026-10-07T05:46:27.965Z",
+      "consecutiveFailures": 7,
+      "lastAttempt": "2026-10-08T05:52:25.955Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-10-07T05:46:27.965Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-10-08T05:52:25.955Z",
       "lastError": "HTTP 429"
     },
-    "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
-      "name": "r/StableDiffusion",
+    "https://mjg59.dreamwidth.org/data/rss": {
+      "name": "mjg59.dreamwidth.org",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-10-07T05:46:27.965Z",
+      "lastAttempt": "2026-10-08T05:52:25.955Z",
+      "lastError": "timeout"
+    },
+    "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
+      "name": "r/comfyui",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-08T05:52:25.955Z",
       "lastError": "HTTP 429"
     }
   }
