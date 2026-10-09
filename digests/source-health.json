@@ -273,20 +273,14 @@
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 6,
-      "lastAttempt": "2026-10-08T05:52:25.955Z",
+      "consecutiveFailures": 7,
+      "lastAttempt": "2026-10-09T05:58:24.972Z",
       "lastError": "HTTP 429"
     },
-    "https://mjg59.dreamwidth.org/data/rss": {
-      "name": "mjg59.dreamwidth.org",
+    "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
+      "name": "r/StableDiffusion",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-10-08T05:52:25.955Z",
-      "lastError": "timeout"
-    },
-    "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
-      "name": "r/comfyui",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-10-08T05:52:25.955Z",
+      "lastAttempt": "2026-10-09T05:58:24.972Z",
       "lastError": "HTTP 429"
     }
   }
