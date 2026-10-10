@@ -255,14 +255,14 @@
     },
     "https://www.reddit.com/r/singularity/top/.rss?t=day": {
       "name": "r/singularity",
-      "consecutiveFailures": 8,
-      "lastAttempt": "2026-10-06T06:10:50.322Z",
+      "consecutiveFailures": 9,
+      "lastAttempt": "2026-10-10T05:40:44.196Z",
       "lastError": "HTTP 429"
     },
     "http://www.aaronsw.com/2002/feeds/pgessays.rss": {
       "name": "paulgraham.com",
-      "consecutiveFailures": 7,
-      "lastAttempt": "2026-10-06T06:10:50.322Z",
+      "consecutiveFailures": 8,
+      "lastAttempt": "2026-10-10T05:40:44.196Z",
       "lastError": "empty feed"
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
@@ -279,9 +279,51 @@
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-10-09T05:58:24.972Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-10-10T05:40:44.196Z",
       "lastError": "HTTP 429"
+    },
+    "https://rss.arxiv.org/rss/cs.MA": {
+      "name": "arXiv Multiagent Systems",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-10T05:40:44.196Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.CL": {
+      "name": "arXiv Computation and Language",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-10T05:40:44.196Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.LG": {
+      "name": "arXiv Machine Learning",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-10T05:40:44.196Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.CR": {
+      "name": "arXiv Cryptography and Security",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-10T05:40:44.196Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.CV": {
+      "name": "arXiv Computer Vision",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-10T05:40:44.196Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.SD": {
+      "name": "arXiv Sound",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-10T05:40:44.196Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/eess.AS": {
+      "name": "arXiv Audio and Speech Processing",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-10T05:40:44.196Z",
+      "lastError": "empty feed"
     }
   }
 }
