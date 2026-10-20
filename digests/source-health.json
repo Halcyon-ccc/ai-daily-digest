@@ -249,14 +249,14 @@
     },
     "https://www.reddit.com/r/singularity/top/.rss?t=day": {
       "name": "r/singularity",
-      "consecutiveFailures": 11,
-      "lastAttempt": "2026-10-17T04:13:42.320Z",
+      "consecutiveFailures": 12,
+      "lastAttempt": "2026-10-20T04:39:03.918Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 9,
-      "lastAttempt": "2026-10-17T04:13:42.320Z",
+      "consecutiveFailures": 10,
+      "lastAttempt": "2026-10-20T04:39:03.918Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
@@ -265,29 +265,23 @@
       "lastAttempt": "2026-10-18T04:19:54.354Z",
       "lastError": "HTTP 429"
     },
-    "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
-      "name": "r/comfyui",
-      "consecutiveFailures": 6,
-      "lastAttempt": "2026-10-19T04:29:32.926Z",
-      "lastError": "HTTP 429"
-    },
     "https://tomrenner.com/index.xml": {
       "name": "tomrenner.com",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-10-19T04:29:32.926Z",
-      "lastError": "ECONNRESET: The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()"
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-10-20T04:39:03.918Z",
+      "lastError": "getaddrinfo EAI_AGAIN tomrenner.com"
     },
     "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
       "name": "r/midjourney",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-10-19T04:29:32.926Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-10-20T04:39:03.918Z",
       "lastError": "HTTP 429"
     },
-    "https://rss.arxiv.org/rss/cs.AI": {
-      "name": "arXiv Artificial Intelligence",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-10-19T04:29:32.926Z",
-      "lastError": "empty feed"
+    "https://www.reddit.com/r/programming/top/.rss?t=day": {
+      "name": "r/programming",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-20T04:39:03.918Z",
+      "lastError": "HTTP 429"
     }
   }
 }
