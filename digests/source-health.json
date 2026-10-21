@@ -261,26 +261,32 @@
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
-      "consecutiveFailures": 7,
-      "lastAttempt": "2026-10-18T04:19:54.354Z",
+      "consecutiveFailures": 8,
+      "lastAttempt": "2026-10-21T04:32:22.497Z",
       "lastError": "HTTP 429"
     },
     "https://tomrenner.com/index.xml": {
       "name": "tomrenner.com",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-10-20T04:39:03.918Z",
-      "lastError": "getaddrinfo EAI_AGAIN tomrenner.com"
-    },
-    "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
-      "name": "r/midjourney",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-10-20T04:39:03.918Z",
-      "lastError": "HTTP 429"
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-10-21T04:32:22.497Z",
+      "lastError": "ECONNRESET: The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()"
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-10-21T04:32:22.497Z",
+      "lastError": "HTTP 429"
+    },
+    "https://idiallo.com/feed.rss": {
+      "name": "idiallo.com",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-10-20T04:39:03.918Z",
+      "lastAttempt": "2026-10-21T04:32:22.497Z",
+      "lastError": "HTTP 403"
+    },
+    "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
+      "name": "r/comfyui",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-21T04:32:22.497Z",
       "lastError": "HTTP 429"
     }
   }
