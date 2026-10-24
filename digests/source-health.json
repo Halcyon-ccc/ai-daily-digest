@@ -249,14 +249,14 @@
     },
     "https://www.reddit.com/r/singularity/top/.rss?t=day": {
       "name": "r/singularity",
-      "consecutiveFailures": 12,
-      "lastAttempt": "2026-10-20T04:39:03.918Z",
+      "consecutiveFailures": 13,
+      "lastAttempt": "2026-10-24T04:26:12.608Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 10,
-      "lastAttempt": "2026-10-20T04:39:03.918Z",
+      "consecutiveFailures": 11,
+      "lastAttempt": "2026-10-24T04:26:12.608Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
@@ -273,27 +273,57 @@
     },
     "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
       "name": "r/comfyui",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-10-23T04:36:37.808Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-10-24T04:26:12.608Z",
       "lastError": "HTTP 429"
-    },
-    "https://mjg59.dreamwidth.org/data/rss": {
-      "name": "mjg59.dreamwidth.org",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-10-23T04:36:37.808Z",
-      "lastError": "timeout"
     },
     "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
       "name": "r/midjourney",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-10-23T04:36:37.808Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-10-24T04:26:12.608Z",
       "lastError": "HTTP 429"
     },
-    "https://www.microsoft.com/en-us/research/feed/": {
-      "name": "Microsoft Research",
+    "https://rss.arxiv.org/rss/cs.MA": {
+      "name": "arXiv Multiagent Systems",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-10-23T04:36:37.808Z",
-      "lastError": "HTTP 502"
+      "lastAttempt": "2026-10-24T04:26:12.608Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.AI": {
+      "name": "arXiv Artificial Intelligence",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-24T04:26:12.608Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.LG": {
+      "name": "arXiv Machine Learning",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-24T04:26:12.608Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.CR": {
+      "name": "arXiv Cryptography and Security",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-24T04:26:12.608Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.CV": {
+      "name": "arXiv Computer Vision",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-24T04:26:12.608Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.SD": {
+      "name": "arXiv Sound",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-24T04:26:12.608Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/eess.AS": {
+      "name": "arXiv Audio and Speech Processing",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-24T04:26:12.608Z",
+      "lastError": "empty feed"
     }
   }
 }
