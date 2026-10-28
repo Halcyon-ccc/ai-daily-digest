@@ -261,20 +261,26 @@
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
-      "consecutiveFailures": 9,
-      "lastAttempt": "2026-10-25T04:30:01.213Z",
+      "consecutiveFailures": 10,
+      "lastAttempt": "2026-10-28T05:27:13.421Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-10-27T04:52:08.658Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-10-28T05:27:13.421Z",
       "lastError": "HTTP 429"
     },
-    "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
-      "name": "r/midjourney",
+    "https://hnrss.org/best": {
+      "name": "Hacker News Best",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-10-27T04:52:08.658Z",
+      "lastAttempt": "2026-10-28T05:27:13.421Z",
+      "lastError": "HTTP 502"
+    },
+    "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
+      "name": "r/comfyui",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-10-28T05:27:13.421Z",
       "lastError": "HTTP 429"
     }
   }
