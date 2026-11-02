@@ -219,14 +219,14 @@
     },
     "https://www.reddit.com/r/singularity/top/.rss?t=day": {
       "name": "r/singularity",
-      "consecutiveFailures": 15,
-      "lastAttempt": "2026-10-30T05:35:28.423Z",
+      "consecutiveFailures": 16,
+      "lastAttempt": "2026-11-02T05:51:18.358Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 13,
-      "lastAttempt": "2026-10-30T05:35:28.423Z",
+      "consecutiveFailures": 14,
+      "lastAttempt": "2026-11-02T05:51:18.358Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
@@ -241,71 +241,47 @@
       "lastAttempt": "2026-10-31T05:24:46.986Z",
       "lastError": "HTTP 429"
     },
-    "https://rss.arxiv.org/rss/cs.MA": {
-      "name": "arXiv Multiagent Systems",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-11-01T05:50:44.347Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.CL": {
-      "name": "arXiv Computation and Language",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-11-01T05:50:44.347Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.LG": {
-      "name": "arXiv Machine Learning",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-11-01T05:50:44.347Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.CR": {
-      "name": "arXiv Cryptography and Security",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-11-01T05:50:44.347Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.CV": {
-      "name": "arXiv Computer Vision",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-11-01T05:50:44.347Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/cs.SD": {
-      "name": "arXiv Sound",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-11-01T05:50:44.347Z",
-      "lastError": "empty feed"
-    },
-    "https://rss.arxiv.org/rss/eess.AS": {
-      "name": "arXiv Audio and Speech Processing",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-11-01T05:50:44.347Z",
-      "lastError": "empty feed"
-    },
-    "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
-      "name": "r/comfyui",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-11-01T05:50:44.347Z",
-      "lastError": "HTTP 429"
-    },
     "https://mjg59.dreamwidth.org/data/rss": {
       "name": "mjg59.dreamwidth.org",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-01T05:50:44.347Z",
-      "lastError": "timeout"
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-02T05:51:18.358Z",
+      "lastError": "HTTP 504"
     },
     "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
       "name": "r/midjourney",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-01T05:50:44.347Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-02T05:51:18.358Z",
       "lastError": "HTTP 429"
     },
-    "https://rss.arxiv.org/rss/cs.AI": {
-      "name": "arXiv Artificial Intelligence",
+    "https://lcamtuf.substack.com/feed": {
+      "name": "lcamtuf.substack.com",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-01T05:50:44.347Z",
-      "lastError": "empty feed"
+      "lastAttempt": "2026-11-02T05:51:18.358Z",
+      "lastError": "HTTP 403"
+    },
+    "https://garymarcus.substack.com/feed": {
+      "name": "garymarcus.substack.com",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-02T05:51:18.358Z",
+      "lastError": "HTTP 403"
+    },
+    "https://gwern.substack.com/feed": {
+      "name": "gwern.net",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-02T05:51:18.358Z",
+      "lastError": "HTTP 403"
+    },
+    "https://worksonmymachine.substack.com/feed": {
+      "name": "worksonmymachine.substack.com",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-02T05:51:18.358Z",
+      "lastError": "HTTP 403"
+    },
+    "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
+      "name": "r/LocalLLaMA",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-02T05:51:18.358Z",
+      "lastError": "HTTP 429"
     }
   }
 }
