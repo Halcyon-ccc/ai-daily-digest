@@ -237,51 +237,99 @@
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
-      "consecutiveFailures": 7,
-      "lastAttempt": "2026-10-31T05:24:46.986Z",
+      "consecutiveFailures": 8,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
       "lastError": "HTTP 429"
-    },
-    "https://mjg59.dreamwidth.org/data/rss": {
-      "name": "mjg59.dreamwidth.org",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-11-02T05:51:18.358Z",
-      "lastError": "HTTP 504"
     },
     "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
       "name": "r/midjourney",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-11-02T05:51:18.358Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
       "lastError": "HTTP 429"
     },
     "https://lcamtuf.substack.com/feed": {
       "name": "lcamtuf.substack.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-02T05:51:18.358Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
       "lastError": "HTTP 403"
     },
     "https://garymarcus.substack.com/feed": {
       "name": "garymarcus.substack.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-02T05:51:18.358Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
       "lastError": "HTTP 403"
     },
     "https://gwern.substack.com/feed": {
       "name": "gwern.net",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-02T05:51:18.358Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
       "lastError": "HTTP 403"
     },
     "https://worksonmymachine.substack.com/feed": {
       "name": "worksonmymachine.substack.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-02T05:51:18.358Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
       "lastError": "HTTP 403"
     },
     "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
       "name": "r/LocalLLaMA",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-02T05:51:18.358Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
       "lastError": "HTTP 429"
+    },
+    "https://blog.pixelmelt.dev/rss/": {
+      "name": "blog.pixelmelt.dev",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
+      "lastError": "HTTP 530"
+    },
+    "https://rss.arxiv.org/rss/cs.MA": {
+      "name": "arXiv Multiagent Systems",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.AI": {
+      "name": "arXiv Artificial Intelligence",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.CL": {
+      "name": "arXiv Computation and Language",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.LG": {
+      "name": "arXiv Machine Learning",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.CR": {
+      "name": "arXiv Cryptography and Security",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.CV": {
+      "name": "arXiv Computer Vision",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.SD": {
+      "name": "arXiv Sound",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/eess.AS": {
+      "name": "arXiv Audio and Speech Processing",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-03T06:35:04.855Z",
+      "lastError": "empty feed"
     }
   }
 }
