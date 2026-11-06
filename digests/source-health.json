@@ -237,50 +237,50 @@
     },
     "https://www.reddit.com/r/midjourney/top/.rss?t=day": {
       "name": "r/midjourney",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-11-05T06:31:11.142Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-11-06T06:26:14.698Z",
       "lastError": "HTTP 429"
     },
     "https://lcamtuf.substack.com/feed": {
       "name": "lcamtuf.substack.com",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-11-05T06:31:11.142Z",
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-11-06T06:26:14.698Z",
       "lastError": "HTTP 403"
     },
     "https://garymarcus.substack.com/feed": {
       "name": "garymarcus.substack.com",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-11-05T06:31:11.142Z",
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-11-06T06:26:14.698Z",
       "lastError": "HTTP 403"
     },
     "https://gwern.substack.com/feed": {
       "name": "gwern.net",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-11-05T06:31:11.142Z",
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-11-06T06:26:14.698Z",
       "lastError": "HTTP 403"
     },
     "https://worksonmymachine.substack.com/feed": {
       "name": "worksonmymachine.substack.com",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-11-05T06:31:11.142Z",
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-11-06T06:26:14.698Z",
       "lastError": "HTTP 403"
-    },
-    "https://mjg59.dreamwidth.org/data/rss": {
-      "name": "mjg59.dreamwidth.org",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-11-05T06:31:11.142Z",
-      "lastError": "timeout"
-    },
-    "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
-      "name": "r/comfyui",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-11-05T06:31:11.142Z",
-      "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-06T06:26:14.698Z",
+      "lastError": "HTTP 429"
+    },
+    "https://skyfall.dev/rss.xml": {
+      "name": "skyfall.dev",
       "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-05T06:31:11.142Z",
+      "lastAttempt": "2026-11-06T06:26:14.698Z",
+      "lastError": "HTTP 402"
+    },
+    "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
+      "name": "r/LocalLLaMA",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-06T06:26:14.698Z",
       "lastError": "HTTP 429"
     }
   }
