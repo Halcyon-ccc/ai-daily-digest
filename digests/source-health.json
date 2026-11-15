@@ -267,69 +267,75 @@
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
-      "consecutiveFailures": 5,
-      "lastAttempt": "2026-11-14T06:07:19.917Z",
+      "consecutiveFailures": 6,
+      "lastAttempt": "2026-11-15T06:13:56.706Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
       "name": "r/comfyui",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-11-14T06:07:19.917Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-11-15T06:13:56.706Z",
       "lastError": "HTTP 429"
     },
     "https://rss.arxiv.org/rss/cs.MA": {
       "name": "arXiv Multiagent Systems",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-11-14T06:07:19.917Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-11-15T06:13:56.706Z",
       "lastError": "empty feed"
     },
     "https://rss.arxiv.org/rss/cs.AI": {
       "name": "arXiv Artificial Intelligence",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-11-14T06:07:19.917Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-11-15T06:13:56.706Z",
       "lastError": "empty feed"
     },
     "https://rss.arxiv.org/rss/cs.CL": {
       "name": "arXiv Computation and Language",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-11-14T06:07:19.917Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-11-15T06:13:56.706Z",
       "lastError": "empty feed"
     },
     "https://rss.arxiv.org/rss/cs.LG": {
       "name": "arXiv Machine Learning",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-11-14T06:07:19.917Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-11-15T06:13:56.706Z",
       "lastError": "empty feed"
     },
     "https://rss.arxiv.org/rss/cs.CR": {
       "name": "arXiv Cryptography and Security",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-11-14T06:07:19.917Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-11-15T06:13:56.706Z",
       "lastError": "empty feed"
     },
     "https://rss.arxiv.org/rss/cs.CV": {
       "name": "arXiv Computer Vision",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-11-14T06:07:19.917Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-11-15T06:13:56.706Z",
       "lastError": "empty feed"
     },
     "https://rss.arxiv.org/rss/cs.SD": {
       "name": "arXiv Sound",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-11-14T06:07:19.917Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-11-15T06:13:56.706Z",
       "lastError": "empty feed"
     },
     "https://rss.arxiv.org/rss/eess.AS": {
       "name": "arXiv Audio and Speech Processing",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-11-14T06:07:19.917Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-11-15T06:13:56.706Z",
       "lastError": "empty feed"
     },
     "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
       "name": "r/LocalLLaMA",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-14T06:07:19.917Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-15T06:13:56.706Z",
       "lastError": "HTTP 429"
+    },
+    "https://hnrss.org/best": {
+      "name": "Hacker News Best",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-15T06:13:56.706Z",
+      "lastError": "timeout"
     }
   }
 }
