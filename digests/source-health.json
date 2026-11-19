@@ -261,8 +261,8 @@
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
-      "consecutiveFailures": 7,
-      "lastAttempt": "2026-11-16T06:12:18.336Z",
+      "consecutiveFailures": 8,
+      "lastAttempt": "2026-11-19T07:12:14.225Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
@@ -273,38 +273,26 @@
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-11-18T07:12:24.592Z",
-      "lastError": "HTTP 404"
-    },
-    "https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/feed.xml": {
-      "name": "chiark.greenend.org.uk/~sgtatham",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-11-18T07:12:24.592Z",
-      "lastError": "timeout"
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-11-19T07:12:14.225Z",
+      "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
       "name": "r/LocalLLaMA",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-11-18T07:12:24.592Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-11-19T07:12:14.225Z",
       "lastError": "HTTP 429"
-    },
-    "https://mjg59.dreamwidth.org/data/rss": {
-      "name": "mjg59.dreamwidth.org",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-18T07:12:24.592Z",
-      "lastError": "HTTP 504"
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-18T07:12:24.592Z",
-      "lastError": "HTTP 429"
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-19T07:12:14.225Z",
+      "lastError": "HTTP 404"
     },
     "https://github.com/microsoft/agent-framework/releases.atom": {
       "name": "Microsoft Agent Framework Releases",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-18T07:12:24.592Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-19T07:12:14.225Z",
       "lastError": "HTTP 404"
     }
   }
