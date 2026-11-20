@@ -273,27 +273,45 @@
     },
     "https://www.reddit.com/r/programming/top/.rss?t=day": {
       "name": "r/programming",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-11-19T07:12:14.225Z",
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-11-20T07:00:00.012Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
       "name": "r/LocalLLaMA",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-11-19T07:12:14.225Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-11-20T07:00:00.012Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
       "name": "r/MachineLearning",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-11-19T07:12:14.225Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-11-20T07:00:00.012Z",
       "lastError": "HTTP 404"
     },
     "https://github.com/microsoft/agent-framework/releases.atom": {
       "name": "Microsoft Agent Framework Releases",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-11-19T07:12:14.225Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-11-20T07:00:00.012Z",
       "lastError": "HTTP 404"
+    },
+    "https://mjg59.dreamwidth.org/data/rss": {
+      "name": "mjg59.dreamwidth.org",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-20T07:00:00.012Z",
+      "lastError": "HTTP 504"
+    },
+    "https://the-decoder.com/feed/": {
+      "name": "The Decoder",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-20T07:00:00.012Z",
+      "lastError": "timeout"
+    },
+    "https://www.microsoft.com/en-us/research/feed/": {
+      "name": "Microsoft Research",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-20T07:00:00.012Z",
+      "lastError": "timeout"
     }
   }
 }
