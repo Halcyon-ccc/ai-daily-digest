@@ -237,9 +237,9 @@
     },
     "https://www.reddit.com/r/StableDiffusion/top/.rss?t=day": {
       "name": "r/StableDiffusion",
-      "consecutiveFailures": 9,
-      "lastAttempt": "2026-11-23T07:22:29.273Z",
-      "lastError": "HTTP 429"
+      "consecutiveFailures": 10,
+      "lastAttempt": "2026-11-26T08:03:11.819Z",
+      "lastError": "HTTP 404"
     },
     "https://www.reddit.com/r/comfyui/top/.rss?t=day": {
       "name": "r/comfyui",
@@ -255,8 +255,8 @@
     },
     "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day": {
       "name": "r/LocalLLaMA",
-      "consecutiveFailures": 7,
-      "lastAttempt": "2026-11-23T07:22:29.273Z",
+      "consecutiveFailures": 8,
+      "lastAttempt": "2026-11-26T08:03:11.819Z",
       "lastError": "HTTP 429"
     },
     "https://www.reddit.com/r/MachineLearning/top/.rss?t=day": {
@@ -273,33 +273,39 @@
     },
     "https://hey.paris/index.xml": {
       "name": "hey.paris",
-      "consecutiveFailures": 3,
-      "lastAttempt": "2026-11-25T08:17:46.246Z",
+      "consecutiveFailures": 4,
+      "lastAttempt": "2026-11-26T08:03:11.819Z",
       "lastError": "getaddrinfo ENOTFOUND hey.paris"
     },
     "https://lcamtuf.substack.com/feed": {
       "name": "lcamtuf.substack.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-25T08:17:46.246Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-26T08:03:11.819Z",
       "lastError": "HTTP 403"
     },
     "https://garymarcus.substack.com/feed": {
       "name": "garymarcus.substack.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-25T08:17:46.246Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-26T08:03:11.819Z",
       "lastError": "HTTP 403"
     },
     "https://gwern.substack.com/feed": {
       "name": "gwern.net",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-25T08:17:46.246Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-26T08:03:11.819Z",
       "lastError": "HTTP 403"
     },
     "https://worksonmymachine.substack.com/feed": {
       "name": "worksonmymachine.substack.com",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-25T08:17:46.246Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-26T08:03:11.819Z",
       "lastError": "HTTP 403"
+    },
+    "https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/feed.xml": {
+      "name": "chiark.greenend.org.uk/~sgtatham",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-26T08:03:11.819Z",
+      "lastError": "ECONNRESET: The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()"
     }
   }
 }
