@@ -273,39 +273,87 @@
     },
     "https://hey.paris/index.xml": {
       "name": "hey.paris",
-      "consecutiveFailures": 4,
-      "lastAttempt": "2026-11-26T08:03:11.819Z",
+      "consecutiveFailures": 5,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
       "lastError": "getaddrinfo ENOTFOUND hey.paris"
     },
     "https://lcamtuf.substack.com/feed": {
       "name": "lcamtuf.substack.com",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-11-26T08:03:11.819Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
       "lastError": "HTTP 403"
     },
     "https://garymarcus.substack.com/feed": {
       "name": "garymarcus.substack.com",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-11-26T08:03:11.819Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
       "lastError": "HTTP 403"
     },
     "https://gwern.substack.com/feed": {
       "name": "gwern.net",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-11-26T08:03:11.819Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
       "lastError": "HTTP 403"
     },
     "https://worksonmymachine.substack.com/feed": {
       "name": "worksonmymachine.substack.com",
-      "consecutiveFailures": 2,
-      "lastAttempt": "2026-11-26T08:03:11.819Z",
+      "consecutiveFailures": 3,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
       "lastError": "HTTP 403"
     },
     "https://www.chiark.greenend.org.uk/~sgtatham/quasiblog/feed.xml": {
       "name": "chiark.greenend.org.uk/~sgtatham",
-      "consecutiveFailures": 1,
-      "lastAttempt": "2026-11-26T08:03:11.819Z",
+      "consecutiveFailures": 2,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
       "lastError": "ECONNRESET: The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()"
+    },
+    "https://shkspr.mobi/blog/feed/": {
+      "name": "shkspr.mobi",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
+      "lastError": "HTTP 415"
+    },
+    "https://dfarq.homeip.net/feed/": {
+      "name": "dfarq.homeip.net",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
+      "lastError": "timeout"
+    },
+    "https://rss.arxiv.org/rss/cs.MA": {
+      "name": "arXiv Multiagent Systems",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.LG": {
+      "name": "arXiv Machine Learning",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.CR": {
+      "name": "arXiv Cryptography and Security",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.CV": {
+      "name": "arXiv Computer Vision",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/cs.SD": {
+      "name": "arXiv Sound",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
+      "lastError": "empty feed"
+    },
+    "https://rss.arxiv.org/rss/eess.AS": {
+      "name": "arXiv Audio and Speech Processing",
+      "consecutiveFailures": 1,
+      "lastAttempt": "2026-11-27T08:10:17.815Z",
+      "lastError": "empty feed"
     }
   }
 }
